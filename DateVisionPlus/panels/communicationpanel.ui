@@ -1,0 +1,418 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>CommunicationPanel</class>
+ <widget class="QWidget" name="CommunicationPanel">
+  <property name="geometry">
+   <rect>
+    <x>0</x>
+    <y>0</y>
+    <width>340</width>
+    <height>520</height>
+   </rect>
+  </property>
+  <property name="windowTitle">
+   <string>通信</string>
+  </property>
+  <layout class="QVBoxLayout" name="mainLayout">
+   <property name="leftMargin">
+    <number>0</number>
+   </property>
+   <property name="topMargin">
+    <number>0</number>
+   </property>
+   <property name="rightMargin">
+    <number>0</number>
+   </property>
+   <property name="bottomMargin">
+    <number>0</number>
+   </property>
+   <item>
+    <widget class="QScrollArea" name="scrollArea">
+     <property name="styleSheet">
+      <string notr="true">QScrollArea { background: #1e1e1e; border: none; }</string>
+     </property>
+     <property name="widgetResizable">
+      <bool>true</bool>
+     </property>
+     <widget class="QWidget" name="scrollContents">
+      <property name="geometry">
+       <rect>
+        <x>0</x>
+        <y>0</y>
+        <width>338</width>
+        <height>518</height>
+       </rect>
+      </property>
+      <layout class="QVBoxLayout" name="contentsLayout">
+       <property name="leftMargin">
+        <number>8</number>
+       </property>
+       <property name="topMargin">
+        <number>8</number>
+       </property>
+       <property name="rightMargin">
+        <number>8</number>
+       </property>
+       <property name="bottomMargin">
+        <number>8</number>
+       </property>
+       <property name="spacing">
+        <number>8</number>
+       </property>
+       <item>
+        <widget class="QGroupBox" name="grpServer">
+         <property name="styleSheet">
+          <string notr="true">QGroupBox { color: #e0e0e0; border: 1px solid #3e3e42; border-radius: 4px; margin-top: 10px; padding-top: 16px; font-size: 12px; font-weight: bold; font-family: &quot;Microsoft YaHei&quot;; }
+QGroupBox::title { subcontrol-origin: margin; left: 10px; padding: 0 4px; }
+QLabel { color: #aaaaaa; font-size: 11px; font-family: &quot;Microsoft YaHei&quot;; }</string>
+         </property>
+         <property name="title">
+          <string>TCP 服务端配置</string>
+         </property>
+         <layout class="QFormLayout" name="serverForm">
+          <property name="spacing">
+           <number>6</number>
+          </property>
+          <item row="0" column="0">
+           <widget class="QLabel" name="lblIpCaption">
+            <property name="text">
+             <string>本机IP:</string>
+            </property>
+           </widget>
+          </item>
+          <item row="0" column="1">
+           <widget class="QLabel" name="lblLocalIp">
+            <property name="styleSheet">
+             <string notr="true">color: #4fc3f7; font-weight: bold; font-size: 13px; font-family: Consolas;</string>
+            </property>
+            <property name="text">
+             <string>127.0.0.1</string>
+            </property>
+            <property name="textInteractionFlags">
+             <set>Qt::TextSelectableByMouse</set>
+            </property>
+           </widget>
+          </item>
+          <item row="1" column="0">
+           <widget class="QLabel" name="lblPortCaption">
+            <property name="text">
+             <string>端口:</string>
+            </property>
+           </widget>
+          </item>
+          <item row="1" column="1">
+           <widget class="QSpinBox" name="spinPort">
+            <property name="styleSheet">
+             <string notr="true">background: #333333; color: #cccccc; border: 1px solid #555555;</string>
+            </property>
+            <property name="minimum">
+             <number>1024</number>
+            </property>
+            <property name="maximum">
+             <number>65535</number>
+            </property>
+            <property name="value">
+             <number>8080</number>
+            </property>
+           </widget>
+          </item>
+          <item row="2" column="0" colspan="2">
+           <widget class="QWidget" name="buttonBar" native="true">
+            <layout class="QHBoxLayout" name="buttonBarLayout">
+             <property name="leftMargin">
+              <number>0</number>
+             </property>
+             <property name="topMargin">
+              <number>0</number>
+             </property>
+             <property name="rightMargin">
+              <number>0</number>
+             </property>
+             <property name="bottomMargin">
+              <number>0</number>
+             </property>
+             <item>
+              <widget class="QPushButton" name="btnStart">
+               <property name="styleSheet">
+                <string notr="true">QPushButton { background: #2e7d32; color: #ffffff; border: 1px solid #555555; padding: 5px 14px; font-size: 12px; font-family: &quot;Microsoft YaHei&quot;; border-radius: 3px; }
+QPushButton:hover { background: #1b5e20; }
+QPushButton:disabled { background: #333333; color: #666666; }</string>
+               </property>
+               <property name="text">
+                <string>启动服务</string>
+               </property>
+              </widget>
+             </item>
+             <item>
+              <widget class="QPushButton" name="btnStop">
+               <property name="styleSheet">
+                <string notr="true">QPushButton { background: #c62828; color: #ffffff; border: 1px solid #555555; padding: 5px 14px; font-size: 12px; font-family: &quot;Microsoft YaHei&quot;; border-radius: 3px; }
+QPushButton:hover { background: #8e0000; }
+QPushButton:disabled { background: #333333; color: #666666; }</string>
+               </property>
+               <property name="text">
+                <string>停止服务</string>
+               </property>
+              </widget>
+             </item>
+             <item>
+              <widget class="QLabel" name="lblStatus">
+               <property name="styleSheet">
+                <string notr="true">color: #888888; font-size: 12px;</string>
+               </property>
+               <property name="text">
+                <string>● 已停止</string>
+               </property>
+              </widget>
+             </item>
+             <item>
+              <spacer name="buttonBarSpacer">
+               <property name="orientation">
+                <enum>Qt::Horizontal</enum>
+               </property>
+               <property name="sizeHint" stdset="0">
+                <size>
+                 <width>40</width>
+                 <height>20</height>
+                </size>
+               </property>
+              </spacer>
+             </item>
+             <item>
+              <widget class="QLabel" name="lblClientCount">
+               <property name="styleSheet">
+                <string notr="true">color: #888888; font-size: 12px;</string>
+               </property>
+               <property name="text">
+                <string>连接: 0</string>
+               </property>
+              </widget>
+             </item>
+            </layout>
+           </widget>
+          </item>
+         </layout>
+        </widget>
+       </item>
+       <item>
+        <widget class="QGroupBox" name="grpControl">
+         <property name="styleSheet">
+          <string notr="true">QGroupBox { color: #e0e0e0; border: 1px solid #3e3e42; border-radius: 4px; margin-top: 10px; padding-top: 16px; font-size: 12px; font-weight: bold; font-family: &quot;Microsoft YaHei&quot;; }
+QGroupBox::title { subcontrol-origin: margin; left: 10px; padding: 0 4px; }
+QLabel { color: #aaaaaa; font-size: 11px; font-family: &quot;Microsoft YaHei&quot;; }</string>
+         </property>
+         <property name="title">
+          <string>检测控制字</string>
+         </property>
+         <layout class="QHBoxLayout" name="controlLayout">
+          <item>
+           <widget class="QLabel" name="lblControlCaption">
+            <property name="text">
+             <string>控制字:</string>
+            </property>
+           </widget>
+          </item>
+          <item>
+           <widget class="QLineEdit" name="editControlWord">
+            <property name="styleSheet">
+             <string notr="true">background: #333333; color: #4fc3f7; border: 1px solid #555555; font-family: Consolas; font-size: 12px;</string>
+            </property>
+            <property name="text">
+             <string>TRIGGER</string>
+            </property>
+            <property name="toolTip">
+             <string>客户端发送此字符串触发检测流程</string>
+            </property>
+           </widget>
+          </item>
+         </layout>
+        </widget>
+       </item>
+       <item>
+        <widget class="QGroupBox" name="grpOutput">
+         <property name="styleSheet">
+          <string notr="true">QGroupBox { color: #e0e0e0; border: 1px solid #3e3e42; border-radius: 4px; margin-top: 10px; padding-top: 16px; font-size: 12px; font-weight: bold; font-family: &quot;Microsoft YaHei&quot;; }
+QGroupBox::title { subcontrol-origin: margin; left: 10px; padding: 0 4px; }
+QLabel { color: #aaaaaa; font-size: 11px; font-family: &quot;Microsoft YaHei&quot;; }</string>
+         </property>
+         <property name="title">
+          <string>输出格式 (支持表达式)</string>
+         </property>
+         <layout class="QVBoxLayout" name="outputLayout">
+          <item>
+           <widget class="QLabel" name="lblHint">
+            <property name="styleSheet">
+             <string notr="true">color: #888888; font-size: 10px;</string>
+            </property>
+            <property name="text">
+             <string>格式: {节点ID.端口名} 引用输出值。支持 + - * / 运算。每行一个输出项。</string>
+            </property>
+            <property name="wordWrap">
+             <bool>true</bool>
+            </property>
+           </widget>
+          </item>
+          <item>
+           <widget class="QTextEdit" name="editOutputFormat">
+            <property name="maximumHeight">
+             <number>100</number>
+            </property>
+            <property name="styleSheet">
+             <string notr="true">background: #1e1e1e; color: #cccccc; border: 1px solid #333333; font-family: Consolas; font-size: 11px;</string>
+            </property>
+            <property name="placeholderText">
+             <string>示例:
+{图像源_1.output}
+{线间距_1.horizontal_dist}</string>
+            </property>
+           </widget>
+          </item>
+          <item>
+           <widget class="QWidget" name="delimBar" native="true">
+            <layout class="QHBoxLayout" name="delimBarLayout">
+             <property name="leftMargin">
+              <number>0</number>
+             </property>
+             <property name="topMargin">
+              <number>0</number>
+             </property>
+             <property name="rightMargin">
+              <number>0</number>
+             </property>
+             <property name="bottomMargin">
+              <number>0</number>
+             </property>
+             <item>
+              <widget class="QLabel" name="lblDelimCaption">
+               <property name="text">
+                <string>分隔符:</string>
+               </property>
+              </widget>
+             </item>
+             <item>
+              <widget class="QComboBox" name="comboDelimiter">
+               <property name="styleSheet">
+                <string notr="true">background: #333333; color: #cccccc; border: 1px solid #555555;</string>
+               </property>
+               <item>
+                <property name="text">
+                 <string>;</string>
+                </property>
+               </item>
+               <item>
+                <property name="text">
+                 <string>,</string>
+                </property>
+               </item>
+               <item>
+                <property name="text">
+                 <string>.</string>
+                </property>
+               </item>
+               <item>
+                <property name="text">
+                 <string>/</string>
+                </property>
+               </item>
+               <item>
+                <property name="text">
+                 <string>|</string>
+                </property>
+               </item>
+               <item>
+                <property name="text">
+                 <string>\t</string>
+                </property>
+               </item>
+               <item>
+                <property name="text">
+                 <string>\n</string>
+                </property>
+               </item>
+               <item>
+                <property name="text">
+                 <string>自定义</string>
+                </property>
+               </item>
+              </widget>
+             </item>
+             <item>
+              <widget class="QLineEdit" name="editCustomDelimiter">
+               <property name="maximumWidth">
+                <number>60</number>
+               </property>
+               <property name="styleSheet">
+                <string notr="true">background: #333333; color: #cccccc; border: 1px solid #555555;</string>
+               </property>
+               <property name="text">
+                <string>;</string>
+               </property>
+              </widget>
+             </item>
+             <item>
+              <spacer name="delimSpacer">
+               <property name="orientation">
+                <enum>Qt::Horizontal</enum>
+               </property>
+               <property name="sizeHint" stdset="0">
+                <size>
+                 <width>40</width>
+                 <height>20</height>
+                </size>
+               </property>
+              </spacer>
+             </item>
+            </layout>
+           </widget>
+          </item>
+         </layout>
+        </widget>
+       </item>
+       <item>
+        <widget class="QGroupBox" name="grpLog">
+         <property name="styleSheet">
+          <string notr="true">QGroupBox { color: #e0e0e0; border: 1px solid #3e3e42; border-radius: 4px; margin-top: 10px; padding-top: 16px; font-size: 12px; font-weight: bold; font-family: &quot;Microsoft YaHei&quot;; }
+QGroupBox::title { subcontrol-origin: margin; left: 10px; padding: 0 4px; }</string>
+         </property>
+         <property name="title">
+          <string>通信日志</string>
+         </property>
+         <layout class="QVBoxLayout" name="logLayout">
+          <item>
+           <widget class="QTextEdit" name="txtCommLog">
+            <property name="minimumHeight">
+             <number>120</number>
+            </property>
+            <property name="styleSheet">
+             <string notr="true">background: #1e1e1e; color: #cccccc; border: 1px solid #333333; font-family: Consolas; font-size: 11px;</string>
+            </property>
+            <property name="readOnly">
+             <bool>true</bool>
+            </property>
+           </widget>
+          </item>
+         </layout>
+        </widget>
+       </item>
+       <item>
+        <spacer name="contentsSpacer">
+         <property name="orientation">
+          <enum>Qt::Vertical</enum>
+         </property>
+         <property name="sizeHint" stdset="0">
+          <size>
+           <width>20</width>
+           <height>20</height>
+          </size>
+         </property>
+        </spacer>
+       </item>
+      </layout>
+     </widget>
+    </widget>
+   </item>
+  </layout>
+ </widget>
+ <resources/>
+ <connections/>
+</ui>

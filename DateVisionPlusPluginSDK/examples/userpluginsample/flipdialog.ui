@@ -1,0 +1,81 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>FlipDialog</class>
+ <widget class="QDialog" name="FlipDialog">
+  <property name="geometry">
+   <rect>
+    <x>0</x>
+    <y>0</y>
+    <width>300</width>
+    <height>150</height>
+   </rect>
+  </property>
+  <property name="windowTitle">
+   <string>图像翻转 - 设置</string>
+  </property>
+  <property name="styleSheet">
+   <string notr="true">QDialog { background: #1e1e1e; }
+QLabel { color: #cccccc; font-size: 12px; font-family: &quot;Microsoft YaHei&quot;; }</string>
+  </property>
+  <layout class="QVBoxLayout" name="mainLayout">
+   <item>
+    <widget class="QLabel" name="lblCaption">
+     <property name="text">
+      <string>翻转模式:</string>
+     </property>
+    </widget>
+   </item>
+   <item>
+    <widget class="QSlider" name="sliderMode">
+     <property name="minimum">
+      <number>0</number>
+     </property>
+     <property name="maximum">
+      <number>2</number>
+     </property>
+     <property name="singleStep">
+      <number>1</number>
+     </property>
+     <property name="pageStep">
+      <number>1</number>
+     </property>
+     <property name="value">
+      <number>0</number>
+     </property>
+     <property name="orientation">
+      <enum>Qt::Horizontal</enum>
+     </property>
+     <property name="tickPosition">
+      <enum>QSlider::TicksBelow</enum>
+     </property>
+    </widget>
+   </item>
+   <item>
+    <widget class="QLabel" name="lblMode">
+     <property name="styleSheet">
+      <string notr="true">color: #4fc3f7; font-size: 13px;</string>
+     </property>
+     <property name="text">
+      <string>水平翻转</string>
+     </property>
+     <property name="alignment">
+      <set>Qt::AlignCenter</set>
+     </property>
+    </widget>
+   </item>
+   <item>
+    <widget class="QPushButton" name="btnOk">
+     <property name="styleSheet">
+      <string notr="true">QPushButton { background: #0d47a1; color: #ffffff; border: 1px solid #555555; padding: 5px 14px; font-size: 12px; font-family: &quot;Microsoft YaHei&quot;; border-radius: 3px; }
+QPushButton:hover { background: #0a3678; }</string>
+     </property>
+     <property name="text">
+      <string>确定</string>
+     </property>
+    </widget>
+   </item>
+  </layout>
+ </widget>
+ <resources/>
+ <connections/>
+</ui>

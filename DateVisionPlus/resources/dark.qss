@@ -1,0 +1,101 @@
+/* OpenVisionPlus 暗色主题 */
+
+QMainWindow {
+    background: #1e1e1e;
+}
+
+QMainWindow::separator {
+    background: #3e3e42;
+    width: 1px;
+    height: 1px;
+}
+
+QDockWidget {
+    background: #252526;
+    color: #e0e0e0;
+}
+
+QDockWidget::title {
+    background: #2d2d30;
+    padding: 6px;
+    border-bottom: 1px solid #3e3e42;
+}
+
+QToolBar {
+    background: #2d2d30;
+    border-bottom: 1px solid #3e3e42;
+    spacing: 4px;
+    padding: 2px;
+}
+
+QMenuBar {
+    background: #2d2d30;
+    color: #e0e0e0;
+    border-bottom: 1px solid #3e3e42;
+}
+
+QMenuBar::item:selected {
+    background: #094771;
+}
+
+QMenu {
+    background: #2d2d30;
+    color: #e0e0e0;
+    border: 1px solid #3e3e42;
+}
+
+QMenu::item:selected {
+    background: #094771;
+}
+
+QStatusBar {
+    background: #007acc;
+    color: #ffffff;
+}
+
+QSplitter::handle {
+    background: #3e3e42;
+}
+
+QToolTip {
+    background: #333333;
+    color: #cccccc;
+    border: 1px solid #555555;
+}
+
+QTabWidget::pane {
+    background: #1e1e1e;
+    border: none;
+}
+
+QTabBar::tab {
+    background: #2d2d30;
+    color: #aaaaaa;
+    padding: 5px 15px;
+}
+
+QTabBar::tab:selected {
+    background: #1e1e1e;
+    color: #ffffff;
+}
+
+QScrollBar:vertical {
+    background: #1e1e1e;
+    width: 10px;
+    margin: 0px;
+}
+
+QScrollBar:horizontal {
+    background: #1e1e1e;
+    height: 10px;
+    margin: 0px;
+}
+
+QScrollBar::handle {
+    background: #4a4a4f;
+    border-radius: 4px;
+}
+
+QScrollBar::add-line, QScrollBar::sub-line {
+    background: none;
+}
