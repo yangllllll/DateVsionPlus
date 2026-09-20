@@ -1,46 +1,58 @@
 #include "executionengine.h"
-#include "connectionitem.h"
-#include "nodeitem.h"
-#include "portitem.h"
-
-#include "../core/pluginbase.h"
 
 #include <QQueue>
 
 namespace OVP {
 
-void ExecutionEngine::setup(const QMap<QString, NodeItem *> &nodes,
-                            const QList<ConnectionItem *> &connections)
+namespace {
+constexpr int kProgressStep = 16;
+}
+
+ExecutionEngine::ExecutionEngine(QObject *parent)
+    : QObject(parent)
+{}
+
+void ExecutionEngine::setup(const QMap<QString, PluginBase *> &plugins, const QList<LinkDef> &links)
 {
-    m_nodes = nodes;
-    m_connections = connections;
+    m_plugins = plugins;
+    m_links = links;
     m_results.clear();
+    m_lastError.clear();
+    m_order.clear();
+    m_orderValid = false;
+
+    rebuildIndex();
+}
+
+void ExecutionEngine::rebuildIndex()
+{
+    m_incomingLinks.clear();
+    for (int i = 0; i < m_links.size(); ++i) {
+        const LinkDef &link = m_links.at(i);
+        if (m_plugins.contains(link.targetNode))
+            m_incomingLinks.insert(link.targetNode, i);
+    }
 }
 
 QStringList ExecutionEngine::topologicalSort() const
 {
-    QMap<QString, QStringList> adjacency;
-    for (auto it = m_nodes.constBegin(); it != m_nodes.constEnd(); ++it)
-        adjacency.insert(it.key(), QStringList());
+    if (m_orderValid)
+        return m_order;
 
-    for (ConnectionItem *conn : m_connections) {
-        if (!conn->sourcePort() || !conn->targetPort())
-            continue;
-        const QString srcId = conn->sourcePort()->node()->nodeId();
-        const QString tgtId = conn->targetPort()->node()->nodeId();
-        if (adjacency.contains(srcId) && m_nodes.contains(tgtId))
-            adjacency[srcId].append(tgtId);
+    m_order.clear();
+
+    QMap<QString, QStringList> adjacency;
+    QMap<QString, int> inDegree;
+    for (auto it = m_plugins.constBegin(); it != m_plugins.constEnd(); ++it) {
+        adjacency.insert(it.key(), QStringList());
+        inDegree.insert(it.key(), 0);
     }
 
-    QMap<QString, int> inDegree;
-    for (auto it = m_nodes.constBegin(); it != m_nodes.constEnd(); ++it)
-        inDegree.insert(it.key(), 0);
-
-    for (auto it = adjacency.constBegin(); it != adjacency.constEnd(); ++it) {
-        for (const QString &target : it.value()) {
-            if (inDegree.contains(target))
-                inDegree[target] += 1;
-        }
+    for (const LinkDef &link : m_links) {
+        if (!m_plugins.contains(link.sourceNode) || !m_plugins.contains(link.targetNode))
+            continue;
+        adjacency[link.sourceNode].append(link.targetNode);
+        inDegree[link.targetNode] += 1;
     }
 
     QQueue<QString> queue;
@@ -49,48 +61,52 @@ QStringList ExecutionEngine::topologicalSort() const
             queue.enqueue(it.key());
     }
 
-    QStringList order;
+    m_order.reserve(m_plugins.size());
     while (!queue.isEmpty()) {
         const QString id = queue.dequeue();
-        order.append(id);
+        m_order.append(id);
         for (const QString &neighbor : adjacency.value(id)) {
             int &degree = inDegree[neighbor];
-            degree -= 1;
-            if (degree == 0)
+            if (--degree == 0)
                 queue.enqueue(neighbor);
         }
     }
 
-    if (order.size() != m_nodes.size())
-        return QStringList();
+    m_orderValid = (m_order.size() == m_plugins.size());
+    if (!m_orderValid)
+        m_order.clear();
 
-    return order;
+    return m_order;
 }
 
 bool ExecutionEngine::hasCycle() const
 {
-    return !m_nodes.isEmpty() && topologicalSort().isEmpty();
+    return !m_plugins.isEmpty() && topologicalSort().isEmpty();
 }
 
-void ExecutionEngine::transferData()
+void ExecutionEngine::transferInputs(const QString &nodeId)
 {
-    for (ConnectionItem *conn : m_connections) {
-        if (!conn->sourcePort() || !conn->targetPort())
-            continue;
-        NodeItem *srcNode = conn->sourcePort()->node();
-        NodeItem *tgtNode = conn->targetPort()->node();
-        if (!srcNode || !tgtNode || !srcNode->plugin() || !tgtNode->plugin())
-            continue;
+    PluginBase *target = m_plugins.value(nodeId, nullptr);
+    if (!target)
+        return;
 
-        const QVariant value = srcNode->plugin()->output(conn->sourcePort()->portName());
-        if (value.isValid())
-            tgtNode->plugin()->setInput(conn->targetPort()->portName(), value);
+    auto it = m_incomingLinks.constFind(nodeId);
+    while (it != m_incomingLinks.constEnd() && it.key() == nodeId) {
+        const LinkDef &link = m_links.at(it.value());
+        PluginBase *source = m_plugins.value(link.sourceNode, nullptr);
+        if (source) {
+            const QVariant value = source->output(link.sourcePort);
+            if (value.isValid())
+                target->setInput(link.targetPort, value);
+        }
+        ++it;
     }
 }
 
 QMap<QString, QVariant> ExecutionEngine::execute()
 {
-    m_running = true;
+    m_stop.store(false, std::memory_order_release);
+    m_running.store(true, std::memory_order_release);
     m_results.clear();
     m_lastError.clear();
 
@@ -98,58 +114,65 @@ QMap<QString, QVariant> ExecutionEngine::execute()
     if (order.isEmpty()) {
         m_lastError = QStringLiteral("流程图存在循环依赖，无法执行");
         m_results.insert(QStringLiteral("_error"), m_lastError);
-        m_running = false;
+        m_running.store(false, std::memory_order_release);
         return m_results;
     }
 
     for (const QString &nodeId : order) {
-        NodeItem *node = m_nodes.value(nodeId, nullptr);
-        if (!node)
-            continue;
-        if (node->plugin())
-            node->plugin()->reset();
-        node->setStatus(-1);
+        PluginBase *plugin = m_plugins.value(nodeId, nullptr);
+        if (plugin)
+            plugin->reset();
     }
 
     QStringList errors;
+    const int total = order.size();
+    int finished = 0;
+
     for (const QString &nodeId : order) {
-        if (!m_running)
+        if (m_stop.load(std::memory_order_acquire))
             break;
 
-        NodeItem *node = m_nodes.value(nodeId, nullptr);
-        if (!node || !node->plugin())
+        PluginBase *plugin = m_plugins.value(nodeId, nullptr);
+        if (!plugin) {
+            ++finished;
             continue;
+        }
 
-        transferData();
+        transferInputs(nodeId);
 
         bool ok = false;
         try {
-            ok = node->plugin()->execute();
+            ok = plugin->execute();
         } catch (const std::exception &e) {
             const QString message = QString::fromUtf8(e.what());
             m_results.insert(nodeId, message);
-            errors.append(QStringLiteral("%1: %2").arg(node->pluginName(), message));
-            node->setStatus(0);
+            errors.append(QStringLiteral("%1: %2").arg(plugin->name(), message));
+            emit nodeFinished(nodeId, 0);
+            ++finished;
             continue;
         } catch (...) {
             const QString message = QStringLiteral("未知异常");
             m_results.insert(nodeId, message);
-            errors.append(QStringLiteral("%1: %2").arg(node->pluginName(), message));
-            node->setStatus(0);
+            errors.append(QStringLiteral("%1: %2").arg(plugin->name(), message));
+            emit nodeFinished(nodeId, 0);
+            ++finished;
             continue;
         }
 
         if (ok) {
-            m_results.insert(nodeId, QVariant(node->plugin()->outputs()));
-            node->setStatus(1);
+            m_results.insert(nodeId, QVariant(plugin->outputs()));
         } else {
-            const QString err = node->plugin()->lastError().isEmpty()
-                                    ? QStringLiteral("执行失败")
-                                    : node->plugin()->lastError();
+            const QString err = plugin->lastError().isEmpty() ? QStringLiteral("执行失败")
+                                                              : plugin->lastError();
             m_results.insert(nodeId, err);
-            errors.append(QStringLiteral("%1: %2").arg(node->pluginName(), err));
-            node->setStatus(0);
+            errors.append(QStringLiteral("%1: %2").arg(plugin->name(), err));
         }
+
+        emit nodeFinished(nodeId, ok ? 1 : 0);
+        ++finished;
+
+        if (finished == total || finished % kProgressStep == 0)
+            emit progressChanged(finished, total);
     }
 
     if (!errors.isEmpty()) {
@@ -157,7 +180,7 @@ QMap<QString, QVariant> ExecutionEngine::execute()
         m_results.insert(QStringLiteral("_error"), m_lastError);
     }
 
-    m_running = false;
+    m_running.store(false, std::memory_order_release);
     return m_results;
 }
 

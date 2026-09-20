@@ -11,7 +11,9 @@ TEMPLATE = app
 CONFIG += c++17
 
 # 主程序导出核心库符号，供用户插件 DLL（Qt Plugin）链接
-DEFINES += DATEVISIONCORE_LIBRARY
+# 宏名必须与 core/coreglobal.h 中的 OPENVISIONCORE_LIBRARY 一致，
+# 否则 OPVCORE_EXPORT 会被展开成 dllimport，moc 生成的代码报 C2491。
+DEFINES += OPENVISIONCORE_LIBRARY
 
 # 工程头文件根目录（uic 生成的 #include "panels/xxx.h" 依赖此项）
 INCLUDEPATH += $$PWD
@@ -32,6 +34,7 @@ SOURCES += \
     dialogs/roigraphics.cpp \
     flowchart/connectionitem.cpp \
     flowchart/executionengine.cpp \
+    flowchart/executionworker.cpp \
     flowchart/flowscene.cpp \
     flowchart/flowview.cpp \
     flowchart/nodeitem.cpp \
@@ -74,6 +77,7 @@ HEADERS += \
     dialogs/roigraphics.h \
     flowchart/connectionitem.h \
     flowchart/executionengine.h \
+    flowchart/executionworker.h \
     flowchart/flowscene.h \
     flowchart/flowview.h \
     flowchart/nodeitem.h \

@@ -30,6 +30,8 @@ public:
 
     QMap<QString, NodeItem *> nodes() const { return m_nodes; }
     QList<ConnectionItem *> connections() const { return m_connections; }
+    /** 按 id 取节点；避免为查一个节点而拷贝整张 nodes() 映射 */
+    NodeItem *node(const QString &nodeId) const { return m_nodes.value(nodeId, nullptr); }
 
     QJsonObject toJson() const;
     void fromJson(const QJsonObject &object);
@@ -50,9 +52,10 @@ protected:
     void mousePressEvent(QGraphicsSceneMouseEvent *event) override;
     void mouseMoveEvent(QGraphicsSceneMouseEvent *event) override;
     void mouseReleaseEvent(QGraphicsSceneMouseEvent *event) override;
+    /** 只绘制当前可视区域的网格，避免为整张 10000x10000 场景维护巨型路径 */
+    void drawBackground(QPainter *painter, const QRectF &rect) override;
 
 private:
-    void drawGrid();
     void finalizeConnection(PortItem *source, PortItem *target);
     void cancelTempConnection();
     void removeConnection(ConnectionItem *connection);

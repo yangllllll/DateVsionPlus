@@ -23,10 +23,9 @@ QImage matToQImage(const cv::Mat &mat)
         return image.copy();
     }
     case 3: {
-        cv::Mat rgb;
-        cv::cvtColor(src, rgb, cv::COLOR_BGR2RGB);
-        QImage image(rgb.data, rgb.cols, rgb.rows, static_cast<int>(rgb.step),
-                     QImage::Format_RGB888);
+        // 直接用 BGR888 承载，省掉一次全图 cvtColor（Qt 会按需自行转换）
+        QImage image(src.data, src.cols, src.rows, static_cast<int>(src.step),
+                     QImage::Format_BGR888);
         return image.copy();
     }
     case 4: {

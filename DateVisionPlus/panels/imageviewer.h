@@ -2,6 +2,7 @@
 #define IMAGEVIEWER_H
 
 #include <QPixmap>
+#include <QSize>
 #include <QWidget>
 
 #include <opencv2/core.hpp>
@@ -27,9 +28,17 @@ protected:
     void wheelEvent(QWheelEvent *event) override;
 
 private:
+    /** 缩放结果按 (视口尺寸 + 缩放参数) 缓存，避免每次重绘都做一次 SmoothTransformation */
+    const QPixmap &scaledPixmap();
+
     QPixmap m_pixmap;
     qreal m_zoom = 1.0;
     bool m_fit = true;
+
+    QPixmap m_scaled;
+    QSize m_scaledViewport;
+    qreal m_scaledZoom = -1.0;
+    bool m_scaledFit = false;
 };
 
 #endif // IMAGEVIEWER_H

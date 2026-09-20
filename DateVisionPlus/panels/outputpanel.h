@@ -3,9 +3,14 @@
 
 #include <QColor>
 #include <QMap>
+#include <QString>
+#include <QStringList>
+#include <QVector>
 #include <QWidget>
 
 #include <QVariant>
+
+class QTimer;
 
 namespace Ui {
 class OutputPanel;
@@ -29,8 +34,20 @@ public slots:
     void updateResults(const QMap<QString, QVariant> &results);
     void clearLog();
 
+private slots:
+    /** 把缓冲的日志一次性写入控件，避免每条日志都触发一次富文本重排 */
+    void flushLog();
+
 private:
+    struct LogEntry
+    {
+        QString message;
+        QString color;
+    };
+
     Ui::OutputPanel *ui = nullptr;
+    QTimer *m_flushTimer = nullptr;
+    QVector<LogEntry> m_pending;
 };
 
 #endif // OUTPUTPANEL_H

@@ -19,12 +19,14 @@ void ImageViewer::setImage(const cv::Mat &image)
 {
     m_pixmap = image.empty() ? QPixmap() : OVP::matToQPixmap(image);
     m_fit = true;
+    m_scaled = QPixmap();
     update();
 }
 
 void ImageViewer::clearImage()
 {
     m_pixmap = QPixmap();
+    m_scaled = QPixmap();
     update();
 }
 
@@ -41,6 +43,28 @@ void ImageViewer::zoomActualSize()
     update();
 }
 
+const QPixmap &ImageViewer::scaledPixmap()
+{
+    const bool stale = m_scaled.isNull() || m_scaledViewport != size()
+                       || m_scaledFit != m_fit
+                       || (!m_fit && qAbs(m_scaledZoom - m_zoom) > 1e-6);
+    if (!stale)
+        return m_scaled;
+
+    if (m_fit) {
+        m_scaled = m_pixmap.scaled(size(), Qt::KeepAspectRatio, Qt::SmoothTransformation);
+    } else {
+        m_scaled = m_pixmap.scaled(static_cast<int>(m_pixmap.width() * m_zoom),
+                                   static_cast<int>(m_pixmap.height() * m_zoom),
+                                   Qt::KeepAspectRatio, Qt::SmoothTransformation);
+    }
+
+    m_scaledViewport = size();
+    m_scaledFit = m_fit;
+    m_scaledZoom = m_zoom;
+    return m_scaled;
+}
+
 void ImageViewer::paintEvent(QPaintEvent *event)
 {
     Q_UNUSED(event);
@@ -54,15 +78,7 @@ void ImageViewer::paintEvent(QPaintEvent *event)
         return;
     }
 
-    QPixmap scaled;
-    if (m_fit) {
-        scaled = m_pixmap.scaled(size(), Qt::KeepAspectRatio, Qt::SmoothTransformation);
-    } else {
-        scaled = m_pixmap.scaled(static_cast<int>(m_pixmap.width() * m_zoom),
-                                 static_cast<int>(m_pixmap.height() * m_zoom),
-                                 Qt::KeepAspectRatio, Qt::SmoothTransformation);
-    }
-
+    const QPixmap &scaled = scaledPixmap();
     const int x = (width() - scaled.width()) / 2;
     const int y = (height() - scaled.height()) / 2;
     painter.drawPixmap(x, y, scaled);

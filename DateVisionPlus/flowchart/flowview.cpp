@@ -32,7 +32,8 @@ FlowView::~FlowView() = default;
 void FlowView::applySettings()
 {
     setRenderHint(QPainter::Antialiasing);
-    setViewportUpdateMode(FullViewportUpdate);
+    // 只重绘脏区：大流程图下 FullViewportUpdate 会让任何局部改动都触发整屏重绘
+    setViewportUpdateMode(SmartViewportUpdate);
     setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOn);
     setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOn);
     setDragMode(RubberBandDrag);

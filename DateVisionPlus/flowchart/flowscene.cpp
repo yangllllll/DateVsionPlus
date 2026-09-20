@@ -7,34 +7,43 @@
 
 #include <QGraphicsSceneMouseEvent>
 #include <QJsonArray>
-#include <QPainterPath>
+#include <QLineF>
+#include <QPainter>
 #include <QPen>
+#include <QRectF>
+#include <QVarLengthArray>
+
+#include <cmath>
 
 namespace OVP {
+namespace {
+constexpr int kGridSize = 20;
+}
 
 FlowScene::FlowScene(QObject *parent)
     : QGraphicsScene(parent)
 {
     setSceneRect(-5000.0, -5000.0, 10000.0, 10000.0);
     setBackgroundBrush(QColor(30, 30, 32));
-    drawGrid();
 }
 
-void FlowScene::drawGrid()
+void FlowScene::drawBackground(QPainter *painter, const QRectF &rect)
 {
-    const QPen pen(QColor(45, 45, 48), 0.5);
-    const int gridSize = 20;
+    painter->fillRect(rect, QColor(30, 30, 32));
 
-    QPainterPath path;
-    for (int x = -5000; x <= 5000; x += gridSize) {
-        path.moveTo(x, -5000);
-        path.lineTo(x, 5000);
-    }
-    for (int y = -5000; y <= 5000; y += gridSize) {
-        path.moveTo(-5000, y);
-        path.lineTo(5000, y);
-    }
-    addPath(path, pen)->setZValue(-10.0);
+    const qreal left = std::floor(rect.left() / kGridSize) * kGridSize;
+    const qreal top = std::floor(rect.top() / kGridSize) * kGridSize;
+    const qreal right = rect.right();
+    const qreal bottom = rect.bottom();
+
+    QVarLengthArray<QLineF, 256> lines;
+    for (qreal x = left; x <= right; x += kGridSize)
+        lines.append(QLineF(x, top, x, bottom));
+    for (qreal y = top; y <= bottom; y += kGridSize)
+        lines.append(QLineF(left, y, right, y));
+
+    painter->setPen(QPen(QColor(45, 45, 48), 0.5));
+    painter->drawLines(lines.data(), lines.size());
 }
 
 NodeItem *FlowScene::addPluginNode(const QString &pluginId, const QPointF &pos)
