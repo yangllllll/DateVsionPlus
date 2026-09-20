@@ -12,3 +12,4 @@ CONFIG  += ordered
 
 SUBDIRS += \
     examples/userpluginsample \
+    examples/dahuacamera \

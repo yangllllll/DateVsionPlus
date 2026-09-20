@@ -23,7 +23,8 @@ OpenVisionPlusPluginSDK/
 │   ├── debug/OpenVisionPlus.lib
 │   └── release/OpenVisionPlus.lib
 ├── templates/myplugin/        # 空白插件模板（复制即可开始）
-└── examples/userpluginsample/ # 完整示例：4 个工具 + 一个专用对话框
+├── examples/userpluginsample/ # 完整示例：4 个工具 + 一个专用对话框
+└── examples/dahuacamera/      # 大华相机插件：MVSDK 取图 + 预览对话框
 ```
 
 ## 快速开始（3 步）
