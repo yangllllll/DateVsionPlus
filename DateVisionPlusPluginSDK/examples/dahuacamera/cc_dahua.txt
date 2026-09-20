@@ -1,0 +1,20 @@
+In file included from mvcameraplugin.h:9,
+                 from mvcameraplugin.cpp:1:
+dahuaimvsdk.h:7:38: warning: "/*" within comment [-Wcomment]
+    7 |  * 对应 Python 版：user_plugins/MVSDK/* + user_plugins/mv_camera.py
+      |                                       
+In file included from mvcameraplugin.h:9,
+                 from mvcameradialog.h:4,
+                 from mvcameradialog.cpp:1:
+dahuaimvsdk.h:7:38: warning: "/*" within comment [-Wcomment]
+    7 |  * 对应 Python 版：user_plugins/MVSDK/* + user_plugins/mv_camera.py
+      |                                       
+In file included from dahuaimvsdk.cpp:1:
+dahuaimvsdk.h:7:38: warning: "/*" within comment [-Wcomment]
+    7 |  * 对应 Python 版：user_plugins/MVSDK/* + user_plugins/mv_camera.py
+      |                                       
+In file included from mvcameraplugin.h:9,
+                 from moc_mvcameraplugin.cpp:9:
+dahuaimvsdk.h:7:38: warning: "/*" within comment [-Wcomment]
+    7 |  * 对应 Python 版：user_plugins/MVSDK/* + user_plugins/mv_camera.py
+      |                                       
