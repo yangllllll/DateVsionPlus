@@ -83,7 +83,7 @@ bool MVCameraPlugin::execute()
     }
 
     setOutput(QStringLiteral("output"), imageValue(frame));
-    m_camera.close();
+
     return true;
 }
 

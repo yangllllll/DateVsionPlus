@@ -13,3 +13,4 @@ CONFIG  += ordered
 SUBDIRS += \
     examples/userpluginsample \
     examples/dahuacamera \
+    examples/websocketserver

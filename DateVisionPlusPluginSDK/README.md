@@ -24,7 +24,8 @@ OpenVisionPlusPluginSDK/
 │   └── release/OpenVisionPlus.lib
 ├── templates/myplugin/        # 空白插件模板（复制即可开始）
 ├── examples/userpluginsample/ # 完整示例：4 个工具 + 一个专用对话框
-└── examples/dahuacamera/      # 大华相机插件：MVSDK 取图 + 预览对话框
+├── examples/dahuacamera/      # 大华相机插件：MVSDK 取图 + 预览对话框
+└── examples/websocketserver/  # WebSocket 图像流推送：图像转 base64 广播给客户端
 ```
 
 ## 快速开始（3 步）

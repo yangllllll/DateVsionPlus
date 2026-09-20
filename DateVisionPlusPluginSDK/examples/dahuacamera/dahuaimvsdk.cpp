@@ -538,12 +538,13 @@ bool DahuaCamera::grab(cv::Mat &out, unsigned int timeoutMs, QString *error)
 {
     // 已在取流（对话框预览）时只取帧，不打断
     const bool alreadyGrabbing = m_grabbing;
+    startGrabbing();
     if (!alreadyGrabbing && !startGrabbing(error))
         return false;
 
     const bool ok = getFrame(out, timeoutMs, error);
-    if (!alreadyGrabbing)
-        stopGrabbing();
+
+    stopGrabbing();
     return ok;
 }
 
