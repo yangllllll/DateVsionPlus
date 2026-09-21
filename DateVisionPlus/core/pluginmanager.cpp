@@ -94,11 +94,11 @@ void PluginManager::loadUserPlugins()
     // 各平台动态库后缀
     QStringList nameFilters;
 #if defined(Q_OS_WIN)
-    nameFilters << QStringLiteral("*.dll");
+    nameFilters << QStringLiteral("plugin.*.dll");
 #elif defined(Q_OS_MACOS)
-    nameFilters << QStringLiteral("*.dylib") << QStringLiteral("*.so");
+    nameFilters << QStringLiteral("plugin.*.dylib") << QStringLiteral("plugin.*.so");
 #else
-    nameFilters << QStringLiteral("*.so");
+    nameFilters << QStringLiteral("plugin.*.so");
 #endif
 
     for (const QString &dirPath : m_pluginDirs) {
