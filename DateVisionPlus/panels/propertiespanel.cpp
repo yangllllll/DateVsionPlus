@@ -4,24 +4,93 @@
 #include "../core/pluginbase.h"
 #include "../flowchart/nodeitem.h"
 
+#include <QAbstractItemView>
 #include <QCheckBox>
 #include <QComboBox>
 #include <QDoubleSpinBox>
 #include <QFileDialog>
 #include <QFont>
+#include <QFontMetrics>
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QLineEdit>
 #include <QPushButton>
+#include <QScreen>
 #include <QScrollArea>
+#include <QSizePolicy>
 #include <QSlider>
 #include <QSpinBox>
+#include <QStyle>
 #include <QVBoxLayout>
 
 namespace {
 const char *kEditorStyle =
     "font-family: 'Microsoft YaHei'; font-size: 11px; background: #333333; color: #cccccc; "
     "border: 1px solid #555555; padding: 2px;";
+
+/**
+ * @brief 弹出列表宽度自适应的下拉框
+ *
+ * QComboBox 默认把弹出列表的宽度限制为自身宽度，属性面板只有 240px 宽，
+ * 选项文字稍长就会被省略成 “...”。此类在每次弹出前按最长选项重新计算宽度。
+ */
+class AutoWidthComboBox : public QComboBox
+{
+public:
+    explicit AutoWidthComboBox(QWidget *parent = nullptr)
+        : QComboBox(parent)
+    {
+        // 控件本身不按内容撑开（否则面板会被挤爆），只填充表单可用宽度
+        setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
+        setMinimumContentsLength(6);
+        setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+    }
+
+protected:
+    void showPopup() override
+    {
+        const int desired = desiredPopupWidth();
+        if (QAbstractItemView *popup = view(); popup && desired > 0) {
+            // 不再把长文本省略成 “...”
+            popup->setTextElideMode(Qt::ElideNone);
+            popup->setMinimumWidth(desired);
+        }
+
+        QComboBox::showPopup();
+
+        // 兜底：个别样式下容器宽度仍受控件宽度限制，弹出后再拉宽并做屏幕边界校正
+        QWidget *container = view() ? view()->window() : nullptr;
+        if (!container || desired <= 0 || container->width() >= desired)
+            return;
+
+        const QRect available = screen() ? screen()->availableGeometry() : QRect();
+        const int popupWidth = available.isValid() ? qMin(desired, available.width() - 16) : desired;
+        int x = container->x();
+        if (available.isValid() && x + popupWidth > available.right())
+            x = qMax(available.left(), available.right() - popupWidth);
+        container->setGeometry(x, container->y(), popupWidth, container->height());
+    }
+
+private:
+    /** 期望的弹出列表宽度：按最长选项文本计算，且不小于控件自身宽度 */
+    int desiredPopupWidth() const
+    {
+        const QFontMetrics fm(font());
+        int maxTextWidth = 0;
+        for (int i = 0; i < count(); ++i)
+            maxTextWidth = qMax(maxTextWidth, fm.horizontalAdvance(itemText(i)));
+        if (maxTextWidth <= 0)
+            return 0;
+
+        // frameWidth() / style() 属于 QFrame，必须拿到 QAbstractItemView 本身的类型
+        QAbstractItemView *popup = view();
+        const int frame = popup ? 2 * popup->frameWidth() : 0;
+        const int scrollBar = popup ? popup->style()->pixelMetric(QStyle::PM_ScrollBarExtent, nullptr, popup) : 0;
+
+        // 预留：左右边框 + 可能的垂直滚动条 + 文本内边距
+        return qMax(width(), maxTextWidth + frame + scrollBar + 12);
+    }
+};
 }
 
 PropertiesPanel::PropertiesPanel(QWidget *parent)
@@ -161,9 +230,10 @@ void PropertiesPanel::addParamWidget(const OVP::ParamDef &def)
         break;
     }
     case OVP::ParamType::Choice: {
-        auto *combo = new QComboBox(this);
+        auto *combo = new AutoWidthComboBox(this);
         combo->addItems(def.choices);
         combo->setCurrentText(current.toString());
+        combo->setToolTip(def.description.isEmpty() ? def.displayName : def.description);
         connect(combo, &QComboBox::currentTextChanged, this,
                 [this, def](const QString &v) { onValueChanged(def.name, v); });
         editor = combo;
