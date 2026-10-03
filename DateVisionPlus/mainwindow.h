@@ -97,6 +97,8 @@ private:
 
     QTimer *m_continuousTimer = nullptr;
     bool m_continuousMode = false;
+    /** 当前编辑类控件是否可用，用于避免重复调用 setEnabled() */
+    bool m_editableUi = true;
     bool m_commTriggered = false;
     QString m_currentFile;
 };

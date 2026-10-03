@@ -40,6 +40,14 @@ using namespace OVP;
 namespace {
 const char *kProjectFilter = "DateVisionPlus 项目文件 (*.dvp);;JSON 文件 (*.json);;所有文件 (*.*)";
 
+/**
+ * 连续运行模式下「上一轮结束」到「下一轮开始」之间的固定等待（毫秒）。
+ * 0 表示不做任何等待：本轮在后台线程跑完、结果回到界面后立刻排队下一轮。
+ * 该定时器是单发的（由执行完成回调重新排期），所以 0ms 也不会空转拖垮界面：
+ * Qt 只在事件队列没有其他待处理事件时才投递 timeout。
+ */
+constexpr int kContinuousIdleMs = 0;
+
 QVariantMap mapValue(const QVariant &value)
 {
     if (value.isValid() && value.metaType().id() == QMetaType::QVariantMap)
@@ -60,8 +68,10 @@ MainWindow::MainWindow(QWidget *parent)
 
     setupWorker();
 
+    // 单发 + 0ms：每轮执行结束后由回调重新排期，靠串行执行而非固定节拍推进
     m_continuousTimer = new QTimer(this);
-    m_continuousTimer->setInterval(100);
+    m_continuousTimer->setSingleShot(true);
+    m_continuousTimer->setInterval(kContinuousIdleMs);
     connect(m_continuousTimer, &QTimer::timeout, this, &MainWindow::doExecute);
 
     setupConnections();
@@ -232,7 +242,7 @@ void MainWindow::onToggleContinuous(bool checked)
 
     if (checked) {
         m_continuousTimer->start();
-        ui->outputPanel->logInfo(QStringLiteral("已开启连续运行模式（每 100ms 触发一次，上一轮未结束则跳过）"));
+        ui->outputPanel->logInfo(QStringLiteral("已开启连续运行模式（上一轮结束后立即执行下一轮）"));
         ui->statusbar->showMessage(QStringLiteral("连续运行中..."));
     } else {
         m_continuousTimer->stop();
@@ -461,6 +471,12 @@ void MainWindow::updateBusyUi()
 {
     const bool editable = !m_executing && !m_continuousMode;
 
+    // 只在状态真正变化时写一遍属性：setEnabled() 会递归作用于整棵子控件树，
+    // 连续运行每轮都调用会白白开销两遍遍历（初始状态与 .ui 一致，即 enabled）
+    if (editable == m_editableUi)
+        return;
+    m_editableUi = editable;
+
     ui->actRun->setEnabled(editable);
     ui->actNew->setEnabled(editable);
     ui->actOpen->setEnabled(editable);
@@ -471,6 +487,19 @@ void MainWindow::updateBusyUi()
 
 void MainWindow::doExecute()
 {
+    // 连续运行的下一轮由执行完成回调统一排期，先取消待触发的那次，避免重复投递
+    m_continuousTimer->stop();
+
+    // 上一轮尚未结束：直接跳过本次触发，避免事件与任务堆积。
+    // 必须放在采集图数据之前 —— 0ms 排期下这里的调用频率很高。
+    if (m_executing) {
+        if (m_commTriggered) {
+            ui->communicationPanel->setResponseData(QStringLiteral("ERROR:BUSY"));
+            m_commTriggered = false;
+        }
+        return;
+    }
+
     QMap<QString, PluginBase *> plugins;
     QList<LinkDef> links;
     collectGraph(plugins, links);
@@ -479,15 +508,6 @@ void MainWindow::doExecute()
         ui->outputPanel->logWarning(QStringLiteral("流程图为空，无法执行"));
         if (m_commTriggered) {
             ui->communicationPanel->setResponseData(QStringLiteral("ERROR:NO_NODES"));
-            m_commTriggered = false;
-        }
-        return;
-    }
-
-    // 上一轮尚未结束：连续模式下直接跳过本次触发，避免事件与任务堆积
-    if (m_executing) {
-        if (m_commTriggered) {
-            ui->communicationPanel->setResponseData(QStringLiteral("ERROR:BUSY"));
             m_commTriggered = false;
         }
         return;
@@ -502,10 +522,10 @@ void MainWindow::doExecute()
 
 void MainWindow::onExecutionStarted(int total)
 {
-    // 统一清除指示灯，避免每个节点单独触发一次重绘
+    // 统一清除指示灯，避免每个节点单独触发一次重绘（已废弃）
     const QMap<QString, NodeItem *> nodes = m_scene->nodes();
-    for (auto it = nodes.constBegin(); it != nodes.constEnd(); ++it)
-        it.value()->setStatus(-1);
+  //  for (auto it = nodes.constBegin(); it != nodes.constEnd(); ++it)
+  //      it.value()->setStatus(-1);
 
     ui->statusbar->showMessage(QStringLiteral("执行中... 共 %1 个节点").arg(total));
 }
@@ -576,6 +596,10 @@ void MainWindow::onExecutionFinished(const QMap<QString, QVariant> &results,
 
     ui->outputPanel->updateResults(results);
     ui->statusbar->showMessage(QStringLiteral("执行完成：%1").arg(statusString));
+
+    // 连续运行：本轮收尾后立刻排队下一轮，不再固定等待 100ms
+    if (m_continuousMode)
+        m_continuousTimer->start();
 }
 
 QString MainWindow::buildCommResponse(const QMap<QString, QVariant> &results)
