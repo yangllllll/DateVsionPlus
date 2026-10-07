@@ -23,17 +23,19 @@ OpenVisionPlusPluginSDK/
 │   ├── debug/OpenVisionPlus.lib
 │   └── release/OpenVisionPlus.lib
 ├── templates/myplugin/        # 空白插件模板（复制即可开始）
-├── examples/userpluginsample/ # 完整示例：4 个工具 + 一个专用对话框
+├── examples/userpluginsample/ # 完整示例：4 个工具 + 一个专用对话框（无模板目录时可直接复制它）
 ├── examples/dahuacamera/      # 大华相机插件：MVSDK 取图 + 预览对话框
 ├── examples/websocketserver/  # WebSocket 图像流推送：图像转 base64 广播给客户端
-└── examples/plc/               # PLC 传值：snap7 动态加载，检测结果写入 M/DB 区
+├── examples/plc/              # PLC 传值：snap7 动态加载，检测结果写入 M/DB 区
+└── examples/uvccamera/        # UVC 摄像头插件：后台线程连续取图，执行时直接输出最新帧
 ```
 
 ## 快速开始（3 步）
 
 ### 1. 建工程
 
-复制 `templates/myplugin/` 为你的插件目录，`.pro` 中改一行 SDK 路径：
+复制 `templates/myplugin/`（模板目录缺失时可直接复制 `examples/userpluginsample/`）
+为你的插件目录，`.pro` 中改一行 SDK 路径：
 
 ```qmake
 include($$PWD/../../pluginsdk.pri)   # 指向本 SDK 的 pluginsdk.pri
@@ -89,6 +91,41 @@ public:
 
 把生成的 DLL 拷到 **`OpenVisionPlus.exe` 同目录的 `plugins/` 子目录**，
 启动主程序即可在工具箱看到新分类；也可通过菜单 **工具 → 刷新插件** 热重载。
+
+## 示例插件一览
+
+| 目录 | 工具 ID | 说明 |
+|---|---|---|
+| `examples/userpluginsample/` | 多个 | 完整示例：4 个工具 + 专用对话框，适合当起步模板 |
+| `examples/dahuacamera/` | `mv_camera` | 大华工业相机：`QLibrary` 动态加载 `MVSDKmd.dll`，未装 SDK 也不会导致 DLL 加载失败 |
+| `examples/websocketserver/` | — | 把图像转 base64 广播给 WebSocket 客户端 |
+| `examples/plc/` | — | snap7 动态加载，检测结果写入 PLC 的 M / DB 区 |
+| `examples/uvccamera/` | `uvc_camera` | 标准 UVC 摄像头：后台线程连续取图，执行时只输出最新帧 |
+
+### UVC 摄像头插件（`examples/uvccamera/`）
+
+依赖 OpenCV 的 `videoio` 模块即可，不需要任何厂商 SDK。
+
+- **取图模型**：`UvcGrabber`（继承 `QThread`）在 `run()` 里打开 `cv::VideoCapture` 后
+  循环 `cap.read()`，每帧写入内部变量并累加帧序号；UI 关闭对话框**不会**关闭摄像头，
+  只有插件析构时才停止线程。
+- **执行时零开销**：`execute()` 不做任何开/关流动作，只读变量，因此没有开关流延迟：
+
+  ```cpp
+  // 等待一帧比上次更新的图（默认，杜绝过时/重复帧）
+  grabber.waitFrame(frame, timeoutMs, lastSeq);
+  // 或直接取当前最新帧（最快，参数 wait_new_frame 关闭时走这条）
+  grabber.lastFrame(frame, &seq);
+  ```
+
+- **参数**：`camera_index`、`width / height / fps`（0 = 摄像头默认值）、
+  `backend`（自动 / MSMF / DirectShow / V4L2 / AVFoundation / 任意，后端用数值常量以兼容 OpenCV 4/5）、
+  `wait_new_frame`、`timeout`。
+- 双击节点打开对话框：刷新摄像头列表（连续 2 个序号打不开即停止扫描）、打开/关闭、
+  设置分辨率与帧率、实时预览并显示实测帧率与帧号。
+
+> 相机类插件推荐统一采用这种「句柄常驻 + 后台线程连续取图 + 帧序号」的结构：
+> 避免每次执行都 start → grab → stop 带来的延迟，也不会取到过时图像。
 
 ## API 速查
 
