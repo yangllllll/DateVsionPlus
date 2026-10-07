@@ -9,9 +9,9 @@
 int main(int argc, char *argv[])
 {
     QApplication app(argc, argv);
-    app.setApplicationName(QStringLiteral("OpenVisionPlus"));
-    app.setOrganizationName(QStringLiteral("DateVision"));
-    app.setApplicationVersion(QStringLiteral("2.0.0"));
+    app.setApplicationName(QStringLiteral("DateVisionPlus"));
+    app.setOrganizationName(QStringLiteral("DateVisionPlus"));
+    app.setApplicationVersion(QStringLiteral("2.0.5"));
 
     // 默认字体与 Fusion 暗色主题
     app.setFont(QFont(QStringLiteral("Microsoft YaHei"), 9));
@@ -26,7 +26,7 @@ int main(int argc, char *argv[])
     QTranslator translator;
     const QStringList uiLanguages = QLocale::system().uiLanguages();
     for (const QString &locale : uiLanguages) {
-        const QString baseName = QStringLiteral("openvisionplus_") + QLocale(locale).name();
+        const QString baseName = QStringLiteral("datevisionplus_") + QLocale(locale).name();
         if (translator.load(QStringLiteral(":/i18n/") + baseName)) {
             app.installTranslator(&translator);
             break;

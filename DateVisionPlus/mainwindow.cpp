@@ -181,7 +181,7 @@ void MainWindow::onOpen()
         ui->communicationPanel->setConfig(root.value(QStringLiteral("communication")).toObject());
 
     m_currentFile = filePath;
-    setWindowTitle(QStringLiteral("OpenVisionPlus - %1").arg(QFileInfo(filePath).fileName()));
+    setWindowTitle(QStringLiteral("DateVisionPlus - %1").arg(QFileInfo(filePath).fileName()));
     ui->outputPanel->logSuccess(QStringLiteral("已打开: %1").arg(filePath));
     ui->statusbar->showMessage(QStringLiteral("已加载: %1").arg(QFileInfo(filePath).fileName()));
 }
@@ -223,7 +223,7 @@ void MainWindow::saveToFile(const QString &filePath)
     }
 
     m_currentFile = filePath;
-    setWindowTitle(QStringLiteral("OpenVisionPlus - %1").arg(QFileInfo(filePath).fileName()));
+    setWindowTitle(QStringLiteral("DateVisionPlus - %1").arg(QFileInfo(filePath).fileName()));
     ui->outputPanel->logSuccess(QStringLiteral("已保存: %1").arg(filePath));
     ui->statusbar->showMessage(QStringLiteral("已保存: %1").arg(QFileInfo(filePath).fileName()));
 }
@@ -287,7 +287,7 @@ void MainWindow::onFit()
 void MainWindow::onAbout()
 {
     QMessageBox::about(this, QStringLiteral("关于 DateVisionPlus"),
-                       QStringLiteral("<h3>DateVisionPlus 工业视觉检测平台 v2.0.0</h3>"
+                       QStringLiteral("<h3>DateVisionPlus 工业视觉检测平台 v2.0.5</h3>"
                                       "<p>基于 Qt6 + OpenCV (C++) 构建</p>"
                                       "<p>开源免费，无授权限制</p>"
                                       "<hr>"
