@@ -20,6 +20,7 @@ PortItem::PortItem(const QString &name, PortType type, bool isInput, NodeItem *n
     setAcceptHoverEvents(true);
     setCursor(Qt::CrossCursor);
     setZValue(1.0);
+    setToolTip(m_name);
 }
 
 QRectF PortItem::boundingRect() const
@@ -34,22 +35,22 @@ void PortItem::paint(QPainter *painter, const QStyleOptionGraphicsItem *option, 
     Q_UNUSED(widget);
     painter->setRenderHint(QPainter::Antialiasing);
 
-    const QColor color = portTypeColor(m_type);
-    const QRectF rect(-PortRadius, -PortRadius, PortRadius * 2.0, PortRadius * 2.0);
+    const QColor typeColor = portTypeColor(m_type);
+    // Retain the type hue while pulling it into the subdued instrument palette.
+    const QColor color((typeColor.red() * 2 + 168 * 3) / 5,
+                       (typeColor.green() * 2 + 187 * 3) / 5,
+                       (typeColor.blue() * 2 + 200 * 3) / 5);
+    const bool hovered = isUnderMouse();
+    const QRectF rect(-PortRadius + 1.0, -PortRadius + 1.0,
+                      (PortRadius - 1.0) * 2.0, (PortRadius - 1.0) * 2.0);
 
-    if (!connectedPorts.isEmpty()) {
-        painter->setBrush(QBrush(color));
-        painter->setPen(QPen(color.darker(130), 1.5));
-    } else {
-        painter->setBrush(QBrush(color.lighter(160)));
-        painter->setPen(QPen(color, 1.5));
-    }
-    painter->drawEllipse(rect);
-
-    if (isUnderMouse()) {
-        painter->setBrush(QBrush(color.lighter(180)));
-        painter->setPen(QPen(Qt::white, 2.0));
-        painter->drawEllipse(rect);
+    painter->setBrush(QColor(14, 22, 29));
+    painter->setPen(QPen(hovered ? QColor(231, 241, 247) : color, hovered ? 2.0 : 1.3));
+    painter->drawRect(rect);
+    if (!connectedPorts.isEmpty() || hovered) {
+        painter->setPen(Qt::NoPen);
+        painter->setBrush(hovered ? QColor(220, 236, 244) : color);
+        painter->drawRect(QRectF(-2.5, -2.5, 5.0, 5.0));
     }
 }
 

@@ -2,9 +2,9 @@
 #include "portitem.h"
 
 #include <QFont>
+#include <QFontMetricsF>
 #include <QGraphicsSceneMouseEvent>
 #include <QPainter>
-#include <QPainterPath>
 #include <QPen>
 #include <QStyleOptionGraphicsItem>
 
@@ -20,6 +20,7 @@ NodeItem::NodeItem(PluginBase *plugin, const QString &nodeId, QGraphicsItem *par
     setFlag(ItemSendsGeometryChanges, true);
     setZValue(2.0);
     setAcceptHoverEvents(true);
+    setToolTip(m_nodeId);
 
     buildPorts();
     updateGeometry();
@@ -75,71 +76,64 @@ void NodeItem::paint(QPainter *painter, const QStyleOptionGraphicsItem *option, 
     Q_UNUSED(widget);
     painter->setRenderHint(QPainter::Antialiasing);
 
-    QColor headerColor(60, 60, 65);
-    QColor bodyColor(35, 35, 38);
-    QColor borderColor(80, 80, 85);
-    qreal borderWidth = 1.0;
+    const bool selected = isSelected();
+    const QColor borderColor = selected ? QColor(177, 201, 214) : QColor(65, 82, 96);
+    const QColor headerColor = selected ? QColor(37, 54, 67) : QColor(27, 37, 47);
+    const QRectF frame(0.75, 0.75, m_width - 1.5, m_height - 1.5);
 
-    if (isSelected()) {
-        headerColor = QColor(0, 120, 215);
-        bodyColor = QColor(45, 45, 50);
-        borderColor = QColor(0, 160, 255);
-        borderWidth = 2.0;
-    }
+    // All decoration stays inside the item bounds, keeping redraws precise.
+    painter->fillRect(frame, QColor(19, 27, 35));
+    painter->fillRect(QRectF(0.75, 0.75, m_width - 1.5, m_headerHeight - 0.75), headerColor);
+    painter->setBrush(Qt::NoBrush);
+    painter->setPen(QPen(borderColor, selected ? 1.5 : 1.0));
+    painter->drawRect(frame);
+    painter->setPen(QPen(QColor(53, 69, 82), 1.0));
+    painter->drawLine(QPointF(1.0, m_headerHeight), QPointF(m_width - 1.0, m_headerHeight));
 
-    // 阴影
-    QPainterPath shadow;
-    shadow.addRoundedRect(QRectF(3.0, 3.0, m_width, m_height), 6.0, 6.0);
-    painter->fillPath(shadow, QColor(0, 0, 0, 60));
-
-    // 主体
-    QPainterPath body;
-    body.addRoundedRect(QRectF(0.0, 0.0, m_width, m_height), 6.0, 6.0);
-    painter->setPen(QPen(borderColor, borderWidth));
-    painter->setBrush(bodyColor);
-    painter->drawPath(body);
-
-    // 标题栏（圆角顶部）
-    QPainterPath header;
-    header.moveTo(6.0, m_headerHeight);
-    header.lineTo(0.0, m_headerHeight);
-    header.lineTo(0.0, 6.0);
-    header.arcTo(0.0, 0.0, 12.0, 12.0, 180.0, -90.0);
-    header.lineTo(m_width - 6.0, 0.0);
-    header.arcTo(m_width - 12.0, 0.0, 12.0, 12.0, 90.0, -90.0);
-    header.lineTo(m_width, m_headerHeight);
-    header.closeSubpath();
-    painter->setPen(Qt::NoPen);
-    painter->setBrush(headerColor);
-    painter->drawPath(header);
+    // Small registration corners echo the industrial instrument panels.
+    painter->setPen(QPen(selected ? QColor(215, 230, 238) : QColor(118, 146, 163), 1.5));
+    painter->drawLine(QPointF(0.75, 9.0), QPointF(0.75, 0.75));
+    painter->drawLine(QPointF(0.75, 0.75), QPointF(9.0, 0.75));
+    painter->drawLine(QPointF(m_width - 9.0, m_height - 0.75),
+                      QPointF(m_width - 0.75, m_height - 0.75));
+    painter->drawLine(QPointF(m_width - 0.75, m_height - 0.75),
+                      QPointF(m_width - 0.75, m_height - 9.0));
 
     // 标题文字
-    painter->setPen(Qt::white);
+    painter->setPen(QColor(224, 233, 239));
     painter->setFont(QFont(QStringLiteral("Microsoft YaHei"), 9, QFont::Bold));
-    painter->drawText(QRectF(6.0, 0.0, m_width - 24.0, m_headerHeight),
-                      Qt::AlignVCenter | Qt::AlignLeft, m_nodeId.left(12));
+    const qreal titleWidth = m_width - 34.0;
+    const QString title = QFontMetricsF(painter->font()).elidedText(m_nodeId, Qt::ElideRight,
+                                                                  titleWidth);
+    painter->drawText(QRectF(10.0, 0.0, titleWidth, m_headerHeight),
+                      Qt::AlignVCenter | Qt::AlignLeft, title);
 
     // 状态指示灯
-    if (m_status >= 0) {
-        const QColor dot = (m_status == 1) ? QColor(76, 175, 80) : QColor(244, 67, 54);
-        painter->setPen(Qt::NoPen);
-        painter->setBrush(dot);
-        painter->drawEllipse(QPointF(m_width - 14.0, m_headerHeight / 2.0), 5.0, 5.0);
-    }
+    const QColor statusColor = m_status < 0 ? QColor(103, 124, 140)
+        : m_status == 1 ? QColor(129, 183, 161) : QColor(218, 139, 129);
+    painter->setPen(QPen(statusColor, 1.0));
+    painter->setBrush(m_status < 0 ? QBrush(Qt::NoBrush) : QBrush(statusColor));
+    painter->drawRect(QRectF(m_width - 17.5, m_headerHeight / 2.0 - 3.5, 7.0, 7.0));
 
     // 端口名
     painter->setFont(QFont(QStringLiteral("Microsoft YaHei"), 8));
-    painter->setPen(QColor(200, 200, 200));
+    painter->setPen(QColor(173, 190, 203));
+    const QFontMetricsF portMetrics(painter->font());
+    const qreal portTextWidth = m_width / 2.0 - 18.0;
 
     for (int i = 0; i < m_inputPorts.size(); ++i) {
         const qreal y = m_headerHeight + m_portSpacing + i * m_portRowHeight + m_portRowHeight / 2.0;
         painter->drawText(QRectF(14.0, y - 9.0, m_width / 2.0 - 18.0, 18.0),
-                          Qt::AlignVCenter | Qt::AlignLeft, m_inputPorts.at(i)->portName());
+                          Qt::AlignVCenter | Qt::AlignLeft,
+                          portMetrics.elidedText(m_inputPorts.at(i)->portName(),
+                                                 Qt::ElideRight, portTextWidth));
     }
     for (int i = 0; i < m_outputPorts.size(); ++i) {
         const qreal y = m_headerHeight + m_portSpacing + i * m_portRowHeight + m_portRowHeight / 2.0;
         painter->drawText(QRectF(m_width / 2.0 + 4.0, y - 9.0, m_width / 2.0 - 18.0, 18.0),
-                          Qt::AlignVCenter | Qt::AlignRight, m_outputPorts.at(i)->portName());
+                          Qt::AlignVCenter | Qt::AlignRight,
+                          portMetrics.elidedText(m_outputPorts.at(i)->portName(),
+                                                 Qt::ElideLeft, portTextWidth));
     }
 }
 

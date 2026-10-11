@@ -8,8 +8,12 @@
 #include <QHostAddress>
 #include <QJsonObject>
 #include <QMessageBox>
+#include <QMap>
 #include <QNetworkInterface>
+#include <QHBoxLayout>
+#include <QStyle>
 #include <QTextCursor>
+#include <QTextDocument>
 
 namespace {
 
@@ -31,6 +35,31 @@ CommunicationPanel::CommunicationPanel(QWidget *parent)
     , ui(new Ui::CommunicationPanel)
 {
     ui->setupUi(this);
+    ui->scrollArea->setFrameShape(QFrame::NoFrame);
+    ui->contentsLayout->setContentsMargins(12, 12, 12, 12);
+    ui->contentsLayout->setSpacing(14);
+    ui->lblLocalIp->setProperty("uiRole", "numeric");
+    ui->lblClientCount->setProperty("uiRole", "numeric");
+    ui->lblHint->setProperty("uiRole", "muted");
+    ui->lblStatus->setProperty("state", "idle");
+    ui->lblStatus->setText(QStringLiteral("■ 已停止"));
+    ui->btnStart->setProperty("uiRole", "primary");
+    ui->btnStart->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+    ui->btnStop->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+    ui->editControlWord->setMinimumWidth(0);
+    ui->spinPort->setMinimumWidth(0);
+    ui->serverForm->setRowWrapPolicy(QFormLayout::WrapLongRows);
+    ui->txtCommLog->document()->setDocumentMargin(10);
+    ui->txtCommLog->setPlaceholderText(QStringLiteral("等待通信连接…"));
+    ui->buttonBarLayout->removeWidget(ui->lblStatus);
+    ui->buttonBarLayout->removeWidget(ui->lblClientCount);
+    auto *statusRow = new QWidget(this);
+    auto *statusLayout = new QHBoxLayout(statusRow);
+    statusLayout->setContentsMargins(0, 4, 0, 0);
+    statusLayout->addWidget(ui->lblStatus);
+    statusLayout->addStretch();
+    statusLayout->addWidget(ui->lblClientCount);
+    ui->serverForm->addRow(statusRow);
 
     m_server = new TcpServer(this);
     ui->lblLocalIp->setText(localIpAddress());
@@ -81,7 +110,15 @@ void CommunicationPanel::appendLog(const QString &message, const QString &color)
 {
     const QString timestamp = QDateTime::currentDateTime().toString(QStringLiteral("HH:mm:ss"));
     ui->txtCommLog->moveCursor(QTextCursor::End);
-    ui->txtCommLog->setTextColor(QColor(color));
+    static const QMap<QString, QString> logPalette = {
+        {QStringLiteral("#2196f3"), QStringLiteral("#b7d2df")},
+        {QStringLiteral("#4caf50"), QStringLiteral("#89b9a3")},
+        {QStringLiteral("#ff9800"), QStringLiteral("#d2b17c")},
+        {QStringLiteral("#f44336"), QStringLiteral("#d28a8a")},
+        {QStringLiteral("#ce93d8"), QStringLiteral("#b7d2df")},
+        {QStringLiteral("#cccccc"), QStringLiteral("#bac8d0")}
+    };
+    ui->txtCommLog->setTextColor(QColor(logPalette.value(color.toLower(), color)));
     ui->txtCommLog->insertPlainText(QStringLiteral("[%1] %2\n").arg(timestamp, message));
     ui->txtCommLog->moveCursor(QTextCursor::End);
 }
@@ -102,8 +139,10 @@ void CommunicationPanel::onStartClicked()
     ui->btnStart->setEnabled(false);
     ui->btnStop->setEnabled(true);
     ui->spinPort->setEnabled(false);
-    ui->lblStatus->setText(QStringLiteral("● 运行中"));
-    ui->lblStatus->setStyleSheet(QStringLiteral("color: #4caf50; font-size: 12px;"));
+    ui->lblStatus->setText(QStringLiteral("■ 运行中"));
+    ui->lblStatus->setProperty("state", "running");
+    ui->lblStatus->style()->unpolish(ui->lblStatus);
+    ui->lblStatus->style()->polish(ui->lblStatus);
 }
 
 void CommunicationPanel::onStopClicked()
@@ -112,8 +151,10 @@ void CommunicationPanel::onStopClicked()
     ui->btnStart->setEnabled(true);
     ui->btnStop->setEnabled(false);
     ui->spinPort->setEnabled(true);
-    ui->lblStatus->setText(QStringLiteral("● 已停止"));
-    ui->lblStatus->setStyleSheet(QStringLiteral("color: #888888; font-size: 12px;"));
+    ui->lblStatus->setText(QStringLiteral("■ 已停止"));
+    ui->lblStatus->setProperty("state", "idle");
+    ui->lblStatus->style()->unpolish(ui->lblStatus);
+    ui->lblStatus->style()->polish(ui->lblStatus);
 }
 
 void CommunicationPanel::onDelimiterChanged(const QString &text)

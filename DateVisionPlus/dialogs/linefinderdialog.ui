@@ -19,12 +19,6 @@
   <property name="windowTitle">
    <string>线查找工具 - ROI绘制与检测</string>
   </property>
-  <property name="styleSheet">
-   <string notr="true">QDialog { background: #1e1e1e; }
-QLabel { color: #aaaaaa; font-size: 11px; font-family: &quot;Microsoft YaHei&quot;; }
-QGroupBox { color: #e0e0e0; border: 1px solid #3e3e42; border-radius: 4px; margin-top: 10px; padding-top: 16px; font-size: 12px; font-weight: bold; font-family: &quot;Microsoft YaHei&quot;; }
-QGroupBox::title { subcontrol-origin: margin; left: 10px; padding: 0 4px; }</string>
-  </property>
   <layout class="QHBoxLayout" name="mainLayout">
    <item>
     <widget class="QWidget" name="leftWidget" native="true">
@@ -43,9 +37,6 @@ QGroupBox::title { subcontrol-origin: margin; left: 10px; padding: 0 4px; }</str
       </property>
       <item>
        <widget class="QGraphicsView" name="graphicsView">
-        <property name="styleSheet">
-         <string notr="true">background: #1e1e1e; border: 1px solid #3e3e42;</string>
-        </property>
        </widget>
       </item>
       <item>
@@ -53,10 +44,6 @@ QGroupBox::title { subcontrol-origin: margin; left: 10px; padding: 0 4px; }</str
         <layout class="QHBoxLayout" name="toolBarLayout">
          <item>
           <widget class="QPushButton" name="btnDetect">
-           <property name="styleSheet">
-            <string notr="true">QPushButton { background: #0d7377; color: #ffffff; border: 1px solid #555555; padding: 5px 14px; font-size: 12px; font-family: &quot;Microsoft YaHei&quot;; border-radius: 3px; }
-QPushButton:hover { background: #0a5c5f; }</string>
-           </property>
            <property name="text">
             <string>检测</string>
            </property>
@@ -64,10 +51,6 @@ QPushButton:hover { background: #0a5c5f; }</string>
          </item>
          <item>
           <widget class="QPushButton" name="btnLearn">
-           <property name="styleSheet">
-            <string notr="true">QPushButton { background: #7b1fa2; color: #ffffff; border: 1px solid #555555; padding: 5px 14px; font-size: 12px; font-family: &quot;Microsoft YaHei&quot;; border-radius: 3px; }
-QPushButton:hover { background: #6a1b9a; }</string>
-           </property>
            <property name="text">
             <string>学习</string>
            </property>
@@ -78,10 +61,6 @@ QPushButton:hover { background: #6a1b9a; }</string>
          </item>
          <item>
           <widget class="QPushButton" name="btnFit">
-           <property name="styleSheet">
-            <string notr="true">QPushButton { background: #3e3e42; color: #ffffff; border: 1px solid #555555; padding: 5px 14px; font-size: 12px; font-family: &quot;Microsoft YaHei&quot;; border-radius: 3px; }
-QPushButton:hover { background: #505050; }</string>
-           </property>
            <property name="text">
             <string>适应窗口</string>
            </property>
@@ -89,10 +68,6 @@ QPushButton:hover { background: #505050; }</string>
          </item>
          <item>
           <widget class="QPushButton" name="btnClearRoi">
-           <property name="styleSheet">
-            <string notr="true">QPushButton { background: #3e3e42; color: #ffffff; border: 1px solid #555555; padding: 5px 14px; font-size: 12px; font-family: &quot;Microsoft YaHei&quot;; border-radius: 3px; }
-QPushButton:hover { background: #505050; }</string>
-           </property>
            <property name="text">
             <string>清除ROI</string>
            </property>
@@ -100,10 +75,6 @@ QPushButton:hover { background: #505050; }</string>
          </item>
          <item>
           <widget class="QPushButton" name="btnDeleteRoi">
-           <property name="styleSheet">
-            <string notr="true">QPushButton { background: #3e3e42; color: #ffffff; border: 1px solid #555555; padding: 5px 14px; font-size: 12px; font-family: &quot;Microsoft YaHei&quot;; border-radius: 3px; }
-QPushButton:hover { background: #505050; }</string>
-           </property>
            <property name="text">
             <string>删除选中ROI</string>
            </property>
@@ -124,9 +95,6 @@ QPushButton:hover { background: #505050; }</string>
          </item>
          <item>
           <widget class="QLabel" name="lblRoiCount">
-           <property name="styleSheet">
-            <string notr="true">color: #aaaaaa; font-size: 12px;</string>
-           </property>
            <property name="text">
             <string>ROI: 0</string>
            </property>
@@ -134,9 +102,6 @@ QPushButton:hover { background: #505050; }</string>
          </item>
          <item>
           <widget class="QLabel" name="lblLineCount">
-           <property name="styleSheet">
-            <string notr="true">color: #aaaaaa; font-size: 12px;</string>
-           </property>
            <property name="text">
             <string>线段: 0</string>
            </property>
@@ -196,9 +161,6 @@ QPushButton:hover { background: #505050; }</string>
          </item>
          <item row="0" column="1">
           <widget class="QComboBox" name="comboSearchDir">
-           <property name="styleSheet">
-            <string notr="true">background: #333333; color: #cccccc; border: 1px solid #555555;</string>
-           </property>
            <property name="toolTip">
             <string>垂直=从上到下扫描找水平线，水平=从左到右扫描找竖直线</string>
            </property>
@@ -223,9 +185,6 @@ QPushButton:hover { background: #505050; }</string>
          </item>
          <item row="1" column="1">
           <widget class="QComboBox" name="comboPolarity">
-           <property name="styleSheet">
-            <string notr="true">background: #333333; color: #cccccc; border: 1px solid #555555;</string>
-           </property>
            <property name="toolTip">
             <string>明到暗=白底黑线，暗到明=黑底白线</string>
            </property>
@@ -248,9 +207,6 @@ QPushButton:hover { background: #505050; }</string>
          </item>
          <item row="2" column="0" colspan="2">
           <widget class="QCheckBox" name="chkLearnMode">
-           <property name="styleSheet">
-            <string notr="true">color: #4fc3f7; font-weight: bold;</string>
-           </property>
            <property name="text">
             <string>启用自动学习</string>
            </property>
@@ -368,9 +324,6 @@ QPushButton:hover { background: #505050; }</string>
          </item>
          <item row="8" column="1">
           <widget class="QSpinBox" name="spinBlur">
-           <property name="styleSheet">
-            <string notr="true">background: #333333; color: #cccccc; border: 1px solid #555555;</string>
-           </property>
            <property name="minimum">
             <number>1</number>
            </property>
@@ -394,9 +347,6 @@ QPushButton:hover { background: #505050; }</string>
          </item>
          <item row="9" column="1">
           <widget class="QComboBox" name="comboDrawColor">
-           <property name="styleSheet">
-            <string notr="true">background: #333333; color: #cccccc; border: 1px solid #555555;</string>
-           </property>
            <item>
             <property name="text">
              <string>绿色</string>
@@ -438,9 +388,6 @@ QPushButton:hover { background: #505050; }</string>
          </item>
          <item row="10" column="1">
           <widget class="QSpinBox" name="spinThickness">
-           <property name="styleSheet">
-            <string notr="true">background: #333333; color: #cccccc; border: 1px solid #555555;</string>
-           </property>
            <property name="minimum">
             <number>1</number>
            </property>
@@ -466,9 +413,6 @@ QPushButton:hover { background: #505050; }</string>
            <property name="maximumHeight">
             <number>120</number>
            </property>
-           <property name="styleSheet">
-            <string notr="true">background: #1e1e1e; color: #cccccc; border: 1px solid #333333; font-size: 11px;</string>
-           </property>
           </widget>
          </item>
         </layout>
@@ -482,10 +426,6 @@ QPushButton:hover { background: #505050; }</string>
         <layout class="QVBoxLayout" name="resultLayout">
          <item>
           <widget class="QTableWidget" name="tblLines">
-           <property name="styleSheet">
-            <string notr="true">QTableWidget { background: #1e1e1e; color: #cccccc; border: 1px solid #333333; gridline-color: #333333; font-size: 11px; }
-QHeaderView::section { background: #2d2d30; color: #aaaaaa; border: 1px solid #333333; padding: 2px; }</string>
-           </property>
            <column>
             <property name="text">
              <string>序号</string>
@@ -534,10 +474,6 @@ QHeaderView::section { background: #2d2d30; color: #aaaaaa; border: 1px solid #3
          </item>
          <item>
           <widget class="QPushButton" name="btnOk">
-           <property name="styleSheet">
-            <string notr="true">QPushButton { background: #0d47a1; color: #ffffff; border: 1px solid #555555; padding: 5px 14px; font-size: 12px; font-family: &quot;Microsoft YaHei&quot;; border-radius: 3px; }
-QPushButton:hover { background: #0a3678; }</string>
-           </property>
            <property name="text">
             <string>确定</string>
            </property>
@@ -545,10 +481,6 @@ QPushButton:hover { background: #0a3678; }</string>
          </item>
          <item>
           <widget class="QPushButton" name="btnCancel">
-           <property name="styleSheet">
-            <string notr="true">QPushButton { background: #3e3e42; color: #ffffff; border: 1px solid #555555; padding: 5px 14px; font-size: 12px; font-family: &quot;Microsoft YaHei&quot;; border-radius: 3px; }
-QPushButton:hover { background: #505050; }</string>
-           </property>
            <property name="text">
             <string>取消</string>
            </property>

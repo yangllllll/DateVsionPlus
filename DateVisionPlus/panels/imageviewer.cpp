@@ -11,7 +11,6 @@ ImageViewer::ImageViewer(QWidget *parent)
     : QWidget(parent)
 {
     setMinimumSize(200, 150);
-    setStyleSheet(QStringLiteral("background: #1e1e1e;"));
     setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
 }
 
@@ -69,12 +68,49 @@ void ImageViewer::paintEvent(QPaintEvent *event)
 {
     Q_UNUSED(event);
     QPainter painter(this);
-    painter.fillRect(rect(), QColor(30, 30, 30));
+    painter.fillRect(rect(), QColor(QStringLiteral("#101519")));
 
     if (m_pixmap.isNull()) {
-        painter.setPen(QColor(100, 100, 100));
-        painter.setFont(QFont(QStringLiteral("Microsoft YaHei"), 11));
-        painter.drawText(rect(), Qt::AlignCenter, QStringLiteral("无图像"));
+        painter.setPen(QColor(QStringLiteral("#25313a")));
+        for (int y = 16; y < height(); y += 24)
+            for (int x = 16; x < width(); x += 24)
+                painter.drawPoint(x, y);
+
+        const QRect frame = rect().adjusted(18, 18, -19, -19);
+        painter.setPen(QColor(QStringLiteral("#293740")));
+        painter.drawRect(frame);
+        painter.setPen(QPen(QColor(QStringLiteral("#7895a5")), 1.4));
+        const int corner = 12;
+        for (const QPoint &point : {frame.topLeft(), frame.topRight(), frame.bottomLeft(), frame.bottomRight()}) {
+            const int dx = point.x() == frame.left() ? corner : -corner;
+            const int dy = point.y() == frame.top() ? corner : -corner;
+            painter.drawLine(point, point + QPoint(dx, 0));
+            painter.drawLine(point, point + QPoint(0, dy));
+        }
+
+        const int cx = width() / 2;
+        const int cy = height() / 2 - 20;
+        const QRect imageRect(cx - 21, cy - 19, 42, 32);
+        painter.setRenderHint(QPainter::Antialiasing);
+        painter.setPen(QPen(QColor(QStringLiteral("#7895a5")), 1.4));
+        painter.drawRect(imageRect);
+        painter.drawLine(cx - 14, cy + 6, cx - 3, cy - 5);
+        painter.drawLine(cx - 3, cy - 5, cx + 4, cy + 2);
+        painter.drawLine(cx + 4, cy + 2, cx + 10, cy - 3);
+        painter.drawLine(cx + 10, cy - 3, cx + 16, cy + 6);
+        painter.drawEllipse(QPointF(cx + 11, cy - 11), 2.0, 2.0);
+
+        QFont titleFont = font();
+        titleFont.setPixelSize(13);
+        painter.setFont(titleFont);
+        painter.setPen(QColor(QStringLiteral("#b7c9d3")));
+        painter.drawText(QRect(20, cy + 27, width() - 40, 20), Qt::AlignCenter,
+                         QStringLiteral("等待图像输入"));
+        titleFont.setPixelSize(11);
+        painter.setFont(titleFont);
+        painter.setPen(QColor(QStringLiteral("#738691")));
+        painter.drawText(QRect(20, cy + 50, width() - 40, 18), Qt::AlignCenter,
+                         QStringLiteral("运行流程后显示节点图像"));
         return;
     }
 

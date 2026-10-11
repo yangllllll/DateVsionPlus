@@ -21,6 +21,20 @@ OutputPanel::OutputPanel(QWidget *parent)
     , ui(new Ui::OutputPanel)
 {
     ui->setupUi(this);
+    ui->header->setProperty("uiRole", "panelToolbar");
+    ui->headerLayout->setContentsMargins(10, 6, 10, 6);
+    ui->lblTitle->setText(QStringLiteral("SESSION LOG"));
+    ui->lblTitle->setProperty("uiRole", "caption");
+    ui->btnClear->setProperty("uiRole", "compact");
+    ui->btnClear->setText(QStringLiteral("清空记录"));
+    ui->tabs->setTabText(0, QStringLiteral("运行日志"));
+    ui->tabs->setTabText(1, QStringLiteral("输出结果"));
+    ui->txtLog->setPlaceholderText(QStringLiteral("运行流程后，这里将显示执行日志。"));
+    ui->txtLog->document()->setDocumentMargin(12);
+    ui->tblResults->setAlternatingRowColors(true);
+    ui->tblResults->verticalHeader()->hide();
+    ui->tblResults->verticalHeader()->setDefaultSectionSize(30);
+    ui->tblResults->setSelectionBehavior(QAbstractItemView::SelectRows);
     ui->tblResults->horizontalHeader()->setSectionResizeMode(QHeaderView::Stretch);
 
     // 由 Qt 自行裁剪历史日志，比每次写入前统计 blockCount() 便宜得多
@@ -76,22 +90,22 @@ void OutputPanel::flushLog()
 
 void OutputPanel::logInfo(const QString &message)
 {
-    log(QStringLiteral("[信息] ") + message, QStringLiteral("#2196f3"));
+    log(QStringLiteral("[信息] ") + message, QStringLiteral("#b7d2df"));
 }
 
 void OutputPanel::logSuccess(const QString &message)
 {
-    log(QStringLiteral("[成功] ") + message, QStringLiteral("#4caf50"));
+    log(QStringLiteral("[成功] ") + message, QStringLiteral("#89b9a3"));
 }
 
 void OutputPanel::logWarning(const QString &message)
 {
-    log(QStringLiteral("[警告] ") + message, QStringLiteral("#ff9800"));
+    log(QStringLiteral("[警告] ") + message, QStringLiteral("#d2b17c"));
 }
 
 void OutputPanel::logError(const QString &message)
 {
-    log(QStringLiteral("[错误] ") + message, QStringLiteral("#f44336"));
+    log(QStringLiteral("[错误] ") + message, QStringLiteral("#d28a8a"));
 }
 
 void OutputPanel::updateResults(const QMap<QString, QVariant> &results)

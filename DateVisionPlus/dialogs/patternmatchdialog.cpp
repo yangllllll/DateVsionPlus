@@ -12,7 +12,17 @@
 #include <QMessageBox>
 #include <QPainter>
 #include <QPixmap>
+#include <QStyle>
 #include <QTableWidgetItem>
+
+namespace {
+void setStatusState(QLabel *label, const char *state)
+{
+    label->setProperty("state", state);
+    label->style()->unpolish(label);
+    label->style()->polish(label);
+}
+}
 
 PatternMatchDialog::PatternMatchDialog(OVP::PatternMatchPlugin *plugin, const cv::Mat &inputImage,
                                        QWidget *parent)
@@ -22,6 +32,18 @@ PatternMatchDialog::PatternMatchDialog(OVP::PatternMatchPlugin *plugin, const cv
     , m_sourceImage(inputImage.clone())
 {
     ui->setupUi(this);
+    ui->mainLayout->setContentsMargins(14, 14, 14, 14);
+    ui->mainLayout->setSpacing(14);
+    ui->toolBar->setProperty("uiRole", "panelToolbar");
+    ui->btnDetect->setProperty("uiRole", "primary");
+    ui->btnOk->setProperty("uiRole", "primary");
+    ui->lblStatus->setProperty("state", "idle");
+    ui->lblTemplatePreview->setProperty("uiRole", "emptyState");
+    ui->lblTemplateSize->setProperty("uiRole", "numeric");
+    ui->tblResults->setAlternatingRowColors(true);
+    ui->tblResults->verticalHeader()->hide();
+    ui->tblResults->verticalHeader()->setDefaultSectionSize(28);
+    ui->graphicsView->setBackgroundBrush(QColor(QStringLiteral("#101519")));
 
     m_scene = new RoiImageScene(this);
     ui->graphicsView->setScene(m_scene);
@@ -119,7 +141,7 @@ void PatternMatchDialog::onTrainClicked()
     ui->lblTemplatePreview->setPixmap(preview);
     ui->lblTemplateSize->setText(QStringLiteral("模板尺寸: %1 x %2").arg(tmpl.cols).arg(tmpl.rows));
     ui->lblStatus->setText(QStringLiteral("模板已训练 (%1x%2)").arg(tmpl.cols).arg(tmpl.rows));
-    ui->lblStatus->setStyleSheet(QStringLiteral("color: #ce93d8; font-size: 12px;"));
+    setStatusState(ui->lblStatus, "ready");
 }
 
 void PatternMatchDialog::onDetectClicked()
@@ -146,9 +168,7 @@ void PatternMatchDialog::onDetectClicked()
         m_matchPositions = OVP::unpackPoints(m_plugin->output(QStringLiteral("match_positions")));
         updateResultTable();
         ui->lblStatus->setText(QStringLiteral("匹配到 %1 个位置").arg(m_matchPositions.size()));
-        ui->lblStatus->setStyleSheet(
-            QStringLiteral("color: %1; font-size: 12px;")
-                .arg(m_matchPositions.isEmpty() ? QStringLiteral("#ff9800") : QStringLiteral("#4caf50")));
+        setStatusState(ui->lblStatus, m_matchPositions.isEmpty() ? "warning" : "running");
     } else {
         QMessageBox::warning(this, QStringLiteral("检测失败"), m_plugin->lastError());
     }
@@ -171,7 +191,7 @@ void PatternMatchDialog::onClearClicked()
     ui->tblResults->setRowCount(0);
     m_matchPositions.clear();
     ui->lblStatus->setText(QStringLiteral("请绘制ROI框"));
-    ui->lblStatus->setStyleSheet(QStringLiteral("color: #aaaaaa; font-size: 12px;"));
+    setStatusState(ui->lblStatus, "idle");
 }
 
 void PatternMatchDialog::updateResultTable()

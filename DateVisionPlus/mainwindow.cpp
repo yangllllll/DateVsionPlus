@@ -22,6 +22,16 @@
 #include "plugins/patternmatchplugin.h"
 
 #include <QDialog>
+#include <QFontMetrics>
+#include <QHBoxLayout>
+#include <QKeySequence>
+#include <QLabel>
+#include <QMenu>
+#include <QPainter>
+#include <QSplitter>
+#include <QStyle>
+#include <QToolButton>
+#include <QVBoxLayout>
 #include <QFile>
 #include <QFileDialog>
 #include <QFileInfo>
@@ -63,6 +73,7 @@ MainWindow::MainWindow(QWidget *parent)
     ui->setupUi(this);
 
     m_scene = ui->flowchartView->flowScene();
+    setupVisualShell();
 
     reloadPlugins();
 
@@ -75,7 +86,250 @@ MainWindow::MainWindow(QWidget *parent)
     connect(m_continuousTimer, &QTimer::timeout, this, &MainWindow::doExecute);
 
     setupConnections();
+    updateWorkspaceSummary();
     ui->statusbar->showMessage(QStringLiteral("就绪"));
+}
+
+void MainWindow::setupVisualShell()
+{
+    // Keep a single command bar; attach actions to the window so hidden menus
+    // do not disable their keyboard shortcuts.
+    ui->menubar->hide();
+    addActions({ui->actNew, ui->actOpen, ui->actSave, ui->actSaveAs, ui->actExit,
+                ui->actRun, ui->actContinuous, ui->actStop, ui->actDelete,
+                ui->actZoomIn, ui->actZoomOut, ui->actFit, ui->actRefreshPlugins,
+                ui->actAbout});
+
+    ui->mainToolBar->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
+    ui->mainToolBar->setIconSize(QSize(16, 16));
+    ui->mainToolBar->setFloatable(false);
+    ui->mainToolBar->setContextMenuPolicy(Qt::PreventContextMenu);
+    const auto setIcon = [this](QAction *action, QStyle::StandardPixmap symbol, const QColor &color) {
+        QPixmap pixmap = style()->standardIcon(symbol).pixmap(16, 16);
+        QPainter painter(&pixmap);
+        painter.setCompositionMode(QPainter::CompositionMode_SourceIn);
+        painter.fillRect(pixmap.rect(), color);
+        painter.end();
+        action->setIcon(QIcon(pixmap));
+    };
+    const QColor iconColor(QStringLiteral("#b7cbd7"));
+    setIcon(ui->actNew, QStyle::SP_FileIcon, iconColor);
+    setIcon(ui->actOpen, QStyle::SP_DirOpenIcon, iconColor);
+    setIcon(ui->actSave, QStyle::SP_DialogSaveButton, iconColor);
+    setIcon(ui->actRun, QStyle::SP_MediaPlay, QColor(QStringLiteral("#273b47")));
+    setIcon(ui->actContinuous, QStyle::SP_BrowserReload, iconColor);
+    setIcon(ui->actStop, QStyle::SP_MediaStop, QColor(QStringLiteral("#d8a1a1")));
+    setIcon(ui->actDelete, QStyle::SP_TrashIcon, iconColor);
+    setIcon(ui->actRefreshPlugins, QStyle::SP_BrowserReload, iconColor);
+    ui->actNew->setIconText(QStringLiteral("新建"));
+    ui->actOpen->setIconText(QStringLiteral("打开"));
+    ui->actSave->setIconText(QStringLiteral("保存"));
+    ui->actRun->setIconText(QStringLiteral("运行  F5"));
+    ui->actDelete->setIconText(QStringLiteral("删除"));
+    ui->actDelete->setToolTip(QStringLiteral("删除选中节点或连线 (Del)"));
+    ui->actRefreshPlugins->setToolTip(QStringLiteral("重新扫描并加载内置工具与用户插件"));
+    ui->mainToolBar->widgetForAction(ui->actRun)->setObjectName(QStringLiteral("runButton"));
+    ui->mainToolBar->widgetForAction(ui->actStop)->setObjectName(QStringLiteral("stopButton"));
+    ui->mainToolBar->addAction(ui->actRefreshPlugins);
+
+    auto *moreButton = new QToolButton(ui->mainToolBar);
+    moreButton->setText(QStringLiteral("更多"));
+    moreButton->setToolTip(QStringLiteral("另存为、关于与退出"));
+    moreButton->setPopupMode(QToolButton::InstantPopup);
+    auto *moreMenu = new QMenu(moreButton);
+    moreMenu->addAction(ui->actSaveAs);
+    moreMenu->addSeparator();
+    moreMenu->addAction(ui->actAbout);
+    moreMenu->addAction(ui->actExit);
+    moreButton->setMenu(moreMenu);
+    ui->mainToolBar->addWidget(moreButton);
+
+    auto *commandSpacer = new QWidget(ui->mainToolBar);
+    commandSpacer->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
+    ui->mainToolBar->addWidget(commandSpacer);
+
+    const auto dockHeading = [](QDockWidget *dock, const QString &title, const QString &index) {
+        auto *heading = new QWidget(dock);
+        heading->setObjectName(QStringLiteral("dockHeading"));
+        auto *layout = new QHBoxLayout(heading);
+        layout->setContentsMargins(14, 11, 14, 11);
+        auto *label = new QLabel(title, heading);
+        label->setProperty("uiRole", "sectionTitle");
+        auto *number = new QLabel(index, heading);
+        number->setProperty("uiRole", "numeric");
+        layout->addWidget(label);
+        layout->addStretch();
+        layout->addWidget(number);
+        dock->setTitleBarWidget(heading);
+    };
+    dockHeading(ui->dockToolbox, QStringLiteral("视觉工具库"), QStringLiteral("01"));
+    dockHeading(ui->dockProperties, QStringLiteral("节点属性"), QStringLiteral("03"));
+    dockHeading(ui->dockBottom, QStringLiteral("监视与输出"), QStringLiteral("04"));
+    setCorner(Qt::BottomLeftCorner, Qt::LeftDockWidgetArea);
+    setCorner(Qt::BottomRightCorner, Qt::RightDockWidgetArea);
+    ui->dockToolbox->setMinimumWidth(212);
+    ui->dockProperties->setMinimumWidth(248);
+
+    auto *workspaceHeader = new QWidget(ui->centralwidget);
+    workspaceHeader->setObjectName(QStringLiteral("workspaceHeader"));
+    auto *workspaceLayout = new QHBoxLayout(workspaceHeader);
+    workspaceLayout->setContentsMargins(14, 8, 12, 8);
+    workspaceLayout->setSpacing(10);
+    auto *title = new QLabel(QStringLiteral("流程编排"), workspaceHeader);
+    title->setObjectName(QStringLiteral("workspaceTitle"));
+    workspaceLayout->addWidget(title);
+    m_projectLabel = new QLabel(workspaceHeader);
+    m_projectLabel->setObjectName(QStringLiteral("projectLabel"));
+    m_projectLabel->setMinimumWidth(0);
+    m_projectLabel->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
+    workspaceLayout->addWidget(m_projectLabel, 1);
+
+    // Live statistics share the command bar with the existing actions.
+    auto *metrics = new QWidget(ui->mainToolBar);
+    metrics->setObjectName(QStringLiteral("toolbarMetrics"));
+    metrics->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Fixed);
+    auto *metricsLayout = new QHBoxLayout(metrics);
+    metricsLayout->setContentsMargins(0, 0, 0, 0);
+    metricsLayout->setSpacing(0);
+    const auto metric = [metricsLayout, metrics](const QString &caption,
+                                                const QString &initial,
+                                                const QString &unit = QString()) {
+        auto *cell = new QWidget(metrics);
+        cell->setProperty("uiRole", "metricCell");
+        auto *layout = new QVBoxLayout(cell);
+        layout->setContentsMargins(6, 0, 6, 0);
+        layout->setSpacing(2);
+        auto *label = new QLabel(caption, cell);
+        label->setProperty("uiRole", "caption");
+        auto *value = new QLabel(initial, cell);
+        value->setProperty("uiRole", "metricValue");
+        layout->addWidget(label);
+        auto *valueLayout = new QHBoxLayout;
+        valueLayout->setSpacing(4);
+        valueLayout->addWidget(value);
+        if (!unit.isEmpty()) {
+            auto *unitLabel = new QLabel(unit, cell);
+            unitLabel->setProperty("uiRole", "metricUnit");
+            valueLayout->addWidget(unitLabel, 0, Qt::AlignBottom);
+        }
+        valueLayout->addStretch();
+        layout->addLayout(valueLayout);
+        metricsLayout->addWidget(cell);
+        return value;
+    };
+    m_nodeCount = metric(QStringLiteral("流程节点"), QStringLiteral("00"));
+    m_connectionCount = metric(QStringLiteral("数据连线"), QStringLiteral("00"));
+    m_cycleTime = metric(QStringLiteral("最近执行"), QStringLiteral("--"), QStringLiteral("ms"));
+    m_runResult = metric(QStringLiteral("执行结果"), QStringLiteral("待运行"));
+    m_runResult->setObjectName(QStringLiteral("runResult"));
+    // Reserve enough width for all result states without shifting the adjacent controls.
+    m_runResult->setMinimumWidth(QFontMetrics(m_runResult->font()).horizontalAdvance(QStringLiteral("执行成功")));
+    ui->mainToolBar->addWidget(metrics);
+
+    auto *toolbarBrand = new QWidget(ui->mainToolBar);
+    toolbarBrand->setObjectName(QStringLiteral("toolbarBrand"));
+    toolbarBrand->setSizePolicy(QSizePolicy::Minimum, QSizePolicy::Fixed);
+    auto *brandLayout = new QHBoxLayout(toolbarBrand);
+    brandLayout->setContentsMargins(12, 0, 0, 0);
+    brandLayout->setSpacing(8);
+    auto *brandMark = new QLabel(QStringLiteral("DV"), toolbarBrand);
+    brandMark->setObjectName(QStringLiteral("toolbarBrandMark"));
+    brandMark->setFixedSize(28, 28);
+    brandMark->setAlignment(Qt::AlignCenter);
+    auto *brandName = new QLabel(QStringLiteral("DateVision+"), toolbarBrand);
+    brandName->setObjectName(QStringLiteral("toolbarBrandName"));
+    brandLayout->addWidget(brandMark);
+    brandLayout->addWidget(brandName);
+    ui->mainToolBar->addWidget(toolbarBrand);
+
+    for (QAction *action : {ui->actZoomOut, ui->actZoomIn, ui->actFit}) {
+        action->setIconText(action == ui->actZoomOut ? QStringLiteral("−")
+                               : action == ui->actZoomIn ? QStringLiteral("+") : QStringLiteral("适应"));
+        auto *button = new QToolButton(workspaceHeader);
+        button->setDefaultAction(action);
+        button->setToolButtonStyle(Qt::ToolButtonTextOnly);
+        button->setProperty("uiRole", "headerControl");
+        button->setAccessibleName(action->text());
+        button->setToolTip(QStringLiteral("%1 (%2)").arg(action->text(), action->shortcut().toString(QKeySequence::NativeText)));
+        workspaceLayout->addWidget(button);
+    }
+    ui->centralLayout->insertWidget(0, workspaceHeader);
+    ui->centralLayout->setStretch(1, 1);
+
+    auto *emptyHint = new QLabel(ui->flowchartView->viewport());
+    emptyHint->setObjectName(QStringLiteral("canvasEmptyHint"));
+    emptyHint->setAlignment(Qt::AlignCenter);
+    emptyHint->setWordWrap(true);
+    emptyHint->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Ignored);
+    emptyHint->setAttribute(Qt::WA_TransparentForMouseEvents);
+    emptyHint->setText(QStringLiteral("<span style='color:#b7d2df; font-size:20px;'>构建你的视觉检测流程</span>"
+                                     "<br><br><span style='color:#8b9da9;'>从左侧拖入工具，或双击工具添加节点</span>"
+                                     "<br><br><span style='color:#697f8c; font-size:11px;'>图像输入  /  图像处理  /  检测定位  /  结果输出</span>"));
+    auto *hintLayout = new QVBoxLayout(ui->flowchartView->viewport());
+    hintLayout->addWidget(emptyHint);
+    const auto updateHint = [this, emptyHint] { emptyHint->setVisible(m_scene->nodes().isEmpty()); };
+    connect(m_scene, &FlowScene::nodeAdded, this, updateHint);
+    connect(m_scene, &FlowScene::nodeRemoved, this, updateHint);
+
+    auto *footer = new QWidget(ui->centralwidget);
+    footer->setObjectName(QStringLiteral("workspaceFooter"));
+    auto *footerLayout = new QHBoxLayout(footer);
+    footerLayout->setContentsMargins(14, 6, 14, 6);
+    auto *guide = new QLabel(QStringLiteral("滚轮缩放  /  拖拽框选  /  拖动端口连线"), footer);
+    guide->setProperty("uiRole", "caption");
+    footerLayout->addWidget(guide);
+    footerLayout->addStretch();
+    auto *canvasTag = new QLabel(QStringLiteral("02  /  FLOW EDITOR"), footer);
+    canvasTag->setProperty("uiRole", "caption");
+    footerLayout->addWidget(canvasTag);
+    ui->centralLayout->addWidget(footer);
+
+    // Let the user size the image and log panes independently.
+    auto *bottomSplitter = new QSplitter(Qt::Horizontal, ui->bottomContents);
+    bottomSplitter->setChildrenCollapsible(false);
+    ui->bottomLayout->removeWidget(ui->previewPanel);
+    ui->bottomLayout->removeWidget(ui->bottomTabs);
+    bottomSplitter->addWidget(ui->previewPanel);
+    bottomSplitter->addWidget(ui->bottomTabs);
+    bottomSplitter->setStretchFactor(0, 1);
+    bottomSplitter->setStretchFactor(1, 1);
+    bottomSplitter->setSizes({380, 440});
+    ui->bottomLayout->addWidget(bottomSplitter);
+    ui->bottomTabs->setTabText(0, QStringLiteral("运行输出"));
+    ui->bottomTabs->setTabText(1, QStringLiteral("TCP 通信"));
+    auto *statusLabel = new QLabel(QStringLiteral("LOCAL  /  本地工作站"), this);
+    statusLabel->setProperty("uiRole", "caption");
+    ui->statusbar->addPermanentWidget(statusLabel);
+
+    connect(m_scene, &FlowScene::nodeAdded, this, &MainWindow::updateWorkspaceSummary);
+    connect(m_scene, &FlowScene::nodeRemoved, this, [this] {
+        ui->propertiesPanel->setNode(nullptr);
+        updateWorkspaceSummary();
+    });
+    connect(m_scene, &FlowScene::connectionChanged, this, &MainWindow::updateWorkspaceSummary);
+    QTimer::singleShot(0, this, [this] {
+        resizeDocks({ui->dockToolbox, ui->dockProperties}, {230, 280}, Qt::Horizontal);
+        resizeDocks({ui->dockBottom}, {260}, Qt::Vertical);
+    });
+}
+
+void MainWindow::updateWorkspaceSummary()
+{
+    m_nodeCount->setText(QStringLiteral("%1").arg(m_scene->nodes().size(), 2, 10, QLatin1Char('0')));
+    m_connectionCount->setText(QStringLiteral("%1").arg(m_scene->connections().size(), 2, 10, QLatin1Char('0')));
+    m_projectLabel->setText(m_currentFile.isEmpty() ? QStringLiteral("未命名项目") : QFileInfo(m_currentFile).fileName());
+    m_projectLabel->setToolTip(m_currentFile);
+}
+
+void MainWindow::setRunResult(const QString &text, const char *state)
+{
+    m_runResult->setText(text);
+    m_runResult->setToolTip(QString());
+    if (m_runResult->property("state").toString() != QString::fromLatin1(state)) {
+        m_runResult->setProperty("state", state);
+        m_runResult->style()->unpolish(m_runResult);
+        m_runResult->style()->polish(m_runResult);
+    }
 }
 
 MainWindow::~MainWindow()
@@ -145,6 +399,10 @@ void MainWindow::onNew()
     ui->previewPanel->clearImage();
     ui->outputPanel->clearLog();
     m_currentFile.clear();
+    updateWorkspaceSummary();
+    m_cycleTime->setText(QStringLiteral("--"));
+    setRunResult(QStringLiteral("待运行"), "idle");
+    m_runResult->setToolTip(QString());
     setWindowTitle(QStringLiteral("DateVisionPlus - 工业视觉检测平台"));
     ui->statusbar->showMessage(QStringLiteral("新建流程图"));
 }
@@ -181,6 +439,10 @@ void MainWindow::onOpen()
         ui->communicationPanel->setConfig(root.value(QStringLiteral("communication")).toObject());
 
     m_currentFile = filePath;
+    updateWorkspaceSummary();
+    m_cycleTime->setText(QStringLiteral("--"));
+    setRunResult(QStringLiteral("待运行"), "idle");
+    m_runResult->setToolTip(QString());
     setWindowTitle(QStringLiteral("DateVisionPlus - %1").arg(QFileInfo(filePath).fileName()));
     ui->outputPanel->logSuccess(QStringLiteral("已打开: %1").arg(filePath));
     ui->statusbar->showMessage(QStringLiteral("已加载: %1").arg(QFileInfo(filePath).fileName()));
@@ -223,6 +485,7 @@ void MainWindow::saveToFile(const QString &filePath)
     }
 
     m_currentFile = filePath;
+    updateWorkspaceSummary();
     setWindowTitle(QStringLiteral("DateVisionPlus - %1").arg(QFileInfo(filePath).fileName()));
     ui->outputPanel->logSuccess(QStringLiteral("已保存: %1").arg(filePath));
     ui->statusbar->showMessage(QStringLiteral("已保存: %1").arg(QFileInfo(filePath).fileName()));
@@ -254,6 +517,8 @@ void MainWindow::onToggleContinuous(bool checked)
 
 void MainWindow::onStop()
 {
+    m_stopRequested = m_executing;
+    setRunResult(QStringLiteral("已停止"), "idle");
     m_worker->requestStop();
     // setChecked(false) 会触发 toggled 信号，从而调用 onToggleContinuous(false)
     if (m_continuousMode)
@@ -505,6 +770,7 @@ void MainWindow::doExecute()
     collectGraph(plugins, links);
 
     if (plugins.isEmpty()) {
+        setRunResult(QStringLiteral("无节点"), "idle");
         ui->outputPanel->logWarning(QStringLiteral("流程图为空，无法执行"));
         if (m_commTriggered) {
             ui->communicationPanel->setResponseData(QStringLiteral("ERROR:NO_NODES"));
@@ -513,6 +779,8 @@ void MainWindow::doExecute()
         return;
     }
 
+    m_stopRequested = false;
+    m_executionClock.start();
     m_executing = true;
     updateBusyUi();
 
@@ -522,6 +790,8 @@ void MainWindow::doExecute()
 
 void MainWindow::onExecutionStarted(int total)
 {
+    if (!m_continuousMode)
+        setRunResult(QStringLiteral("执行中"), "running");
     // 统一清除指示灯，避免每个节点单独触发一次重绘（已废弃）
     const QMap<QString, NodeItem *> nodes = m_scene->nodes();
   //  for (auto it = nodes.constBegin(); it != nodes.constEnd(); ++it)
@@ -544,6 +814,22 @@ void MainWindow::onExecutionProgress(int finished, int total)
 void MainWindow::onExecutionFinished(const QMap<QString, QVariant> &results,
                                      const QStringList &order)
 {
+    if (m_executionClock.isValid())
+        m_cycleTime->setText(QString::number(m_executionClock.elapsed()));
+    int succeeded = 0;
+    for (const QString &nodeId : order) {
+        const QVariant value = results.value(nodeId);
+        if (value.isValid() && value.metaType().id() == QMetaType::QVariantMap)
+            ++succeeded;
+    }
+    if (m_stopRequested) {
+        setRunResult(QStringLiteral("已停止"), "idle");
+    } else if (results.contains(QStringLiteral("_error")) || succeeded != order.size()) {
+        setRunResult(QStringLiteral("执行异常"), "error");
+    } else {
+        setRunResult(QStringLiteral("执行成功"), "success");
+    }
+    m_runResult->setToolTip(QStringLiteral("成功执行节点：%1 / %2").arg(succeeded).arg(order.size()));
     m_executing = false;
     updateBusyUi();
 

@@ -4,6 +4,7 @@
 #include "flowchart/executionworker.h"
 
 #include <QList>
+#include <QElapsedTimer>
 #include <QMainWindow>
 #include <QMap>
 #include <QSet>
@@ -15,6 +16,7 @@
 #include <opencv2/core.hpp>
 
 class QThread;
+class QLabel;
 
 namespace OVP {
 class FlowScene;
@@ -66,6 +68,9 @@ private slots:
     void onExecutionFinished(const QMap<QString, QVariant> &results, const QStringList &order);
 
 private:
+    void setupVisualShell();
+    void updateWorkspaceSummary();
+    void setRunResult(const QString &text, const char *state);
     void setupConnections();
     /** 创建后台执行线程，使流程计算不再阻塞界面 */
     void setupWorker();
@@ -101,6 +106,13 @@ private:
     bool m_editableUi = true;
     bool m_commTriggered = false;
     QString m_currentFile;
+    QLabel *m_projectLabel = nullptr;
+    QLabel *m_nodeCount = nullptr;
+    QLabel *m_connectionCount = nullptr;
+    QLabel *m_cycleTime = nullptr;
+    QLabel *m_runResult = nullptr;
+    QElapsedTimer m_executionClock;
+    bool m_stopRequested = false;
 };
 
 #endif // MAINWINDOW_H

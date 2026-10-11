@@ -28,9 +28,6 @@
    </property>
    <item>
     <widget class="QScrollArea" name="scrollArea">
-     <property name="styleSheet">
-      <string notr="true">QScrollArea { background: #1e1e1e; border: none; }</string>
-     </property>
      <property name="widgetResizable">
       <bool>true</bool>
      </property>
@@ -61,11 +58,6 @@
        </property>
        <item>
         <widget class="QGroupBox" name="grpServer">
-         <property name="styleSheet">
-          <string notr="true">QGroupBox { color: #e0e0e0; border: 1px solid #3e3e42; border-radius: 4px; margin-top: 10px; padding-top: 16px; font-size: 12px; font-weight: bold; font-family: &quot;Microsoft YaHei&quot;; }
-QGroupBox::title { subcontrol-origin: margin; left: 10px; padding: 0 4px; }
-QLabel { color: #aaaaaa; font-size: 11px; font-family: &quot;Microsoft YaHei&quot;; }</string>
-         </property>
          <property name="title">
           <string>TCP 服务端配置</string>
          </property>
@@ -82,9 +74,6 @@ QLabel { color: #aaaaaa; font-size: 11px; font-family: &quot;Microsoft YaHei&quo
           </item>
           <item row="0" column="1">
            <widget class="QLabel" name="lblLocalIp">
-            <property name="styleSheet">
-             <string notr="true">color: #4fc3f7; font-weight: bold; font-size: 13px; font-family: Consolas;</string>
-            </property>
             <property name="text">
              <string>127.0.0.1</string>
             </property>
@@ -102,9 +91,6 @@ QLabel { color: #aaaaaa; font-size: 11px; font-family: &quot;Microsoft YaHei&quo
           </item>
           <item row="1" column="1">
            <widget class="QSpinBox" name="spinPort">
-            <property name="styleSheet">
-             <string notr="true">background: #333333; color: #cccccc; border: 1px solid #555555;</string>
-            </property>
             <property name="minimum">
              <number>1024</number>
             </property>
@@ -133,11 +119,6 @@ QLabel { color: #aaaaaa; font-size: 11px; font-family: &quot;Microsoft YaHei&quo
              </property>
              <item>
               <widget class="QPushButton" name="btnStart">
-               <property name="styleSheet">
-                <string notr="true">QPushButton { background: #2e7d32; color: #ffffff; border: 1px solid #555555; padding: 5px 14px; font-size: 12px; font-family: &quot;Microsoft YaHei&quot;; border-radius: 3px; }
-QPushButton:hover { background: #1b5e20; }
-QPushButton:disabled { background: #333333; color: #666666; }</string>
-               </property>
                <property name="text">
                 <string>启动服务</string>
                </property>
@@ -145,11 +126,6 @@ QPushButton:disabled { background: #333333; color: #666666; }</string>
              </item>
              <item>
               <widget class="QPushButton" name="btnStop">
-               <property name="styleSheet">
-                <string notr="true">QPushButton { background: #c62828; color: #ffffff; border: 1px solid #555555; padding: 5px 14px; font-size: 12px; font-family: &quot;Microsoft YaHei&quot;; border-radius: 3px; }
-QPushButton:hover { background: #8e0000; }
-QPushButton:disabled { background: #333333; color: #666666; }</string>
-               </property>
                <property name="text">
                 <string>停止服务</string>
                </property>
@@ -157,9 +133,6 @@ QPushButton:disabled { background: #333333; color: #666666; }</string>
              </item>
              <item>
               <widget class="QLabel" name="lblStatus">
-               <property name="styleSheet">
-                <string notr="true">color: #888888; font-size: 12px;</string>
-               </property>
                <property name="text">
                 <string>● 已停止</string>
                </property>
@@ -180,9 +153,6 @@ QPushButton:disabled { background: #333333; color: #666666; }</string>
              </item>
              <item>
               <widget class="QLabel" name="lblClientCount">
-               <property name="styleSheet">
-                <string notr="true">color: #888888; font-size: 12px;</string>
-               </property>
                <property name="text">
                 <string>连接: 0</string>
                </property>
@@ -196,11 +166,6 @@ QPushButton:disabled { background: #333333; color: #666666; }</string>
        </item>
        <item>
         <widget class="QGroupBox" name="grpControl">
-         <property name="styleSheet">
-          <string notr="true">QGroupBox { color: #e0e0e0; border: 1px solid #3e3e42; border-radius: 4px; margin-top: 10px; padding-top: 16px; font-size: 12px; font-weight: bold; font-family: &quot;Microsoft YaHei&quot;; }
-QGroupBox::title { subcontrol-origin: margin; left: 10px; padding: 0 4px; }
-QLabel { color: #aaaaaa; font-size: 11px; font-family: &quot;Microsoft YaHei&quot;; }</string>
-         </property>
          <property name="title">
           <string>检测控制字</string>
          </property>
@@ -214,9 +179,6 @@ QLabel { color: #aaaaaa; font-size: 11px; font-family: &quot;Microsoft YaHei&quo
           </item>
           <item>
            <widget class="QLineEdit" name="editControlWord">
-            <property name="styleSheet">
-             <string notr="true">background: #333333; color: #4fc3f7; border: 1px solid #555555; font-family: Consolas; font-size: 12px;</string>
-            </property>
             <property name="text">
              <string>TRIGGER</string>
             </property>
@@ -230,20 +192,12 @@ QLabel { color: #aaaaaa; font-size: 11px; font-family: &quot;Microsoft YaHei&quo
        </item>
        <item>
         <widget class="QGroupBox" name="grpOutput">
-         <property name="styleSheet">
-          <string notr="true">QGroupBox { color: #e0e0e0; border: 1px solid #3e3e42; border-radius: 4px; margin-top: 10px; padding-top: 16px; font-size: 12px; font-weight: bold; font-family: &quot;Microsoft YaHei&quot;; }
-QGroupBox::title { subcontrol-origin: margin; left: 10px; padding: 0 4px; }
-QLabel { color: #aaaaaa; font-size: 11px; font-family: &quot;Microsoft YaHei&quot;; }</string>
-         </property>
          <property name="title">
           <string>输出格式 (支持表达式)</string>
          </property>
          <layout class="QVBoxLayout" name="outputLayout">
           <item>
            <widget class="QLabel" name="lblHint">
-            <property name="styleSheet">
-             <string notr="true">color: #888888; font-size: 10px;</string>
-            </property>
             <property name="text">
              <string>格式: {节点ID.端口名} 引用输出值。支持 + - * / 运算。每行一个输出项。</string>
             </property>
@@ -256,9 +210,6 @@ QLabel { color: #aaaaaa; font-size: 11px; font-family: &quot;Microsoft YaHei&quo
            <widget class="QTextEdit" name="editOutputFormat">
             <property name="maximumHeight">
              <number>100</number>
-            </property>
-            <property name="styleSheet">
-             <string notr="true">background: #1e1e1e; color: #cccccc; border: 1px solid #333333; font-family: Consolas; font-size: 11px;</string>
             </property>
             <property name="placeholderText">
              <string>示例:
@@ -291,9 +242,6 @@ QLabel { color: #aaaaaa; font-size: 11px; font-family: &quot;Microsoft YaHei&quo
              </item>
              <item>
               <widget class="QComboBox" name="comboDelimiter">
-               <property name="styleSheet">
-                <string notr="true">background: #333333; color: #cccccc; border: 1px solid #555555;</string>
-               </property>
                <item>
                 <property name="text">
                  <string>;</string>
@@ -341,9 +289,6 @@ QLabel { color: #aaaaaa; font-size: 11px; font-family: &quot;Microsoft YaHei&quo
                <property name="maximumWidth">
                 <number>60</number>
                </property>
-               <property name="styleSheet">
-                <string notr="true">background: #333333; color: #cccccc; border: 1px solid #555555;</string>
-               </property>
                <property name="text">
                 <string>;</string>
                </property>
@@ -370,10 +315,6 @@ QLabel { color: #aaaaaa; font-size: 11px; font-family: &quot;Microsoft YaHei&quo
        </item>
        <item>
         <widget class="QGroupBox" name="grpLog">
-         <property name="styleSheet">
-          <string notr="true">QGroupBox { color: #e0e0e0; border: 1px solid #3e3e42; border-radius: 4px; margin-top: 10px; padding-top: 16px; font-size: 12px; font-weight: bold; font-family: &quot;Microsoft YaHei&quot;; }
-QGroupBox::title { subcontrol-origin: margin; left: 10px; padding: 0 4px; }</string>
-         </property>
          <property name="title">
           <string>通信日志</string>
          </property>
@@ -382,9 +323,6 @@ QGroupBox::title { subcontrol-origin: margin; left: 10px; padding: 0 4px; }</str
            <widget class="QTextEdit" name="txtCommLog">
             <property name="minimumHeight">
              <number>120</number>
-            </property>
-            <property name="styleSheet">
-             <string notr="true">background: #1e1e1e; color: #cccccc; border: 1px solid #333333; font-family: Consolas; font-size: 11px;</string>
             </property>
             <property name="readOnly">
              <bool>true</bool>

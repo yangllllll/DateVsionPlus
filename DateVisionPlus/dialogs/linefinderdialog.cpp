@@ -10,7 +10,17 @@
 #include <QListWidgetItem>
 #include <QMessageBox>
 #include <QPainter>
+#include <QStyle>
 #include <QTableWidgetItem>
+
+namespace {
+void setStatusState(QLabel *label, const char *state)
+{
+    label->setProperty("state", state);
+    label->style()->unpolish(label);
+    label->style()->polish(label);
+}
+}
 
 LineFinderDialog::LineFinderDialog(OVP::LineFinderPlugin *plugin, const cv::Mat &inputImage,
                                    QWidget *parent)
@@ -20,6 +30,17 @@ LineFinderDialog::LineFinderDialog(OVP::LineFinderPlugin *plugin, const cv::Mat 
     , m_sourceImage(inputImage.clone())
 {
     ui->setupUi(this);
+    ui->mainLayout->setContentsMargins(14, 14, 14, 14);
+    ui->mainLayout->setSpacing(14);
+    ui->toolBar->setProperty("uiRole", "panelToolbar");
+    ui->btnDetect->setProperty("uiRole", "primary");
+    ui->btnOk->setProperty("uiRole", "primary");
+    ui->lblRoiCount->setProperty("uiRole", "numeric");
+    ui->lblLineCount->setProperty("uiRole", "numeric");
+    ui->tblLines->setAlternatingRowColors(true);
+    ui->tblLines->verticalHeader()->hide();
+    ui->tblLines->verticalHeader()->setDefaultSectionSize(28);
+    ui->graphicsView->setBackgroundBrush(QColor(QStringLiteral("#101519")));
 
     m_scene = new RoiImageScene(this);
     ui->graphicsView->setScene(m_scene);
@@ -119,10 +140,10 @@ void LineFinderDialog::onDetectClicked()
         updateLineTable();
         ui->lblLineCount->setText(QStringLiteral("线段: %1").arg(m_detectedLines.size()));
         if (m_detectedLines.isEmpty()) {
-            ui->lblLineCount->setStyleSheet(QStringLiteral("color: #ff9800; font-size: 12px;"));
+            setStatusState(ui->lblLineCount, "warning");
             ui->lblLineCount->setToolTip(QStringLiteral("未检测到线段，请降低边缘阈值或霍夫阈值"));
         } else {
-            ui->lblLineCount->setStyleSheet(QStringLiteral("color: #4caf50; font-size: 12px;"));
+            setStatusState(ui->lblLineCount, "running");
             ui->lblLineCount->setToolTip(QString());
         }
     } else {
@@ -172,7 +193,7 @@ void LineFinderDialog::onLearnClicked()
     m_detectedLines = m_plugin->detectedLines();
     updateLineTable();
     ui->lblLineCount->setText(QStringLiteral("线段: %1 (已学习)").arg(m_detectedLines.size()));
-    ui->lblLineCount->setStyleSheet(QStringLiteral("color: #ce93d8; font-size: 12px;"));
+    setStatusState(ui->lblLineCount, "ready");
     ui->lblLineCount->setToolTip(QStringLiteral("学习完成\n阈值: [%1, %2]\n线: (%3,%4) → (%5,%6)")
                                      .arg(edgeT1)
                                      .arg(edgeT2)

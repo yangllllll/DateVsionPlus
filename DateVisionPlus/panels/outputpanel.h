@@ -26,7 +26,7 @@ public:
     ~OutputPanel() override;
 
 public slots:
-    void log(const QString &message, const QString &color = QStringLiteral("#cccccc"));
+    void log(const QString &message, const QString &color = QStringLiteral("#bac8d0"));
     void logInfo(const QString &message);
     void logSuccess(const QString &message);
     void logWarning(const QString &message);

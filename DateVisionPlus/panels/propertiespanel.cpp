@@ -24,10 +24,6 @@
 #include <QVBoxLayout>
 
 namespace {
-const char *kEditorStyle =
-    "font-family: 'Microsoft YaHei'; font-size: 11px; background: #333333; color: #cccccc; "
-    "border: 1px solid #555555; padding: 2px;";
-
 /**
  * @brief 弹出列表宽度自适应的下拉框
  *
@@ -98,12 +94,15 @@ PropertiesPanel::PropertiesPanel(QWidget *parent)
     , ui(new Ui::PropertiesPanel)
 {
     ui->setupUi(this);
+    ui->lblTitle->hide();
+    ui->scrollArea->setFrameShape(QFrame::NoFrame);
     m_form = ui->formLayout;
-
-    auto *hint = new QLabel(QStringLiteral("  (未选中节点)"), this);
-    hint->setFont(QFont(QStringLiteral("Microsoft YaHei"), 9));
-    hint->setStyleSheet(QStringLiteral("color: #888888; padding: 16px;"));
-    m_form->addRow(hint);
+    m_form->setContentsMargins(14, 16, 14, 14);
+    m_form->setHorizontalSpacing(12);
+    m_form->setVerticalSpacing(12);
+    m_form->setRowWrapPolicy(QFormLayout::WrapLongRows);
+    m_form->setLabelAlignment(Qt::AlignLeft | Qt::AlignVCenter);
+    setNode(nullptr);
 }
 
 PropertiesPanel::~PropertiesPanel()
@@ -133,9 +132,14 @@ void PropertiesPanel::setNode(OVP::NodeItem *node)
     clearForm();
 
     if (!node) {
-        auto *hint = new QLabel(QStringLiteral("  (未选中节点)"), this);
-        hint->setFont(QFont(QStringLiteral("Microsoft YaHei"), 9));
-        hint->setStyleSheet(QStringLiteral("color: #888888; padding: 16px;"));
+        auto *caption = new QLabel(QStringLiteral("PARAMETERS / 参数配置"), this);
+        caption->setProperty("uiRole", "caption");
+        m_form->addRow(caption);
+        auto *hint = new QLabel(QStringLiteral("等待选择节点\n\n在流程画布中选择一个工具，\n查看并调整运行参数。"), this);
+        hint->setProperty("uiRole", "emptyState");
+        hint->setWordWrap(true);
+        hint->setAlignment(Qt::AlignLeft | Qt::AlignTop);
+        hint->setMinimumHeight(124);
         m_form->addRow(hint);
         return;
     }
@@ -144,16 +148,16 @@ void PropertiesPanel::setNode(OVP::NodeItem *node)
     const QList<OVP::ParamDef> params = plugin ? plugin->inputParams() : QList<OVP::ParamDef>();
 
     if (params.isEmpty()) {
-        auto *label = new QLabel(QStringLiteral("  工具: %1\n  无参数").arg(node->pluginName()), this);
-        label->setFont(QFont(QStringLiteral("Microsoft YaHei"), 9));
-        label->setStyleSheet(QStringLiteral("color: #aaaaaa; padding: 8px;"));
+        auto *label = new QLabel(QStringLiteral("%1\n\n该工具无需配置参数").arg(node->pluginName()), this);
+        label->setProperty("uiRole", "emptyState");
+        label->setWordWrap(true);
         m_form->addRow(label);
         return;
     }
 
-    auto *nameLabel = new QLabel(QStringLiteral("  %1").arg(node->pluginName()), this);
-    nameLabel->setFont(QFont(QStringLiteral("Microsoft YaHei"), 10, QFont::Bold));
-    nameLabel->setStyleSheet(QStringLiteral("color: #4fc3f7; padding: 4px 0 8px 0;"));
+    auto *nameLabel = new QLabel(node->pluginName(), this);
+    nameLabel->setProperty("uiRole", "sectionTitle");
+    nameLabel->setWordWrap(true);
     m_form->addRow(nameLabel);
 
     for (const OVP::ParamDef &def : params)
@@ -208,8 +212,9 @@ void PropertiesPanel::addParamWidget(const OVP::ParamDef &def)
         slider->setRange(static_cast<int>(def.minValue), static_cast<int>(def.maxValue));
         slider->setValue(current.toInt());
         auto *valueLabel = new QLabel(QString::number(slider->value()), container);
-        valueLabel->setStyleSheet(QStringLiteral("color: #cccccc; min-width: 30px;"));
-        valueLabel->setFont(QFont(QStringLiteral("Microsoft YaHei"), 9));
+        valueLabel->setProperty("uiRole", "numeric");
+        valueLabel->setMinimumWidth(30);
+        valueLabel->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
         connect(slider, &QSlider::valueChanged, this, [valueLabel](int v) {
             valueLabel->setText(QString::number(v));
         });
@@ -245,14 +250,12 @@ void PropertiesPanel::addParamWidget(const OVP::ParamDef &def)
         layout->setContentsMargins(0, 0, 0, 0);
         auto *lineEdit = new QLineEdit(container);
         lineEdit->setReadOnly(true);
-        lineEdit->setStyleSheet(
-            QStringLiteral("background: #333333; color: #cccccc; border: 1px solid #555555; padding: 2px;"));
+        lineEdit->setMinimumWidth(0);
         lineEdit->setText(current.toString());
         auto *button = new QPushButton(QStringLiteral("..."), container);
         button->setMaximumWidth(30);
-        button->setStyleSheet(
-            QStringLiteral("QPushButton { background: #3e3e42; color: #cccccc; border: 1px solid #555555; }"
-                           "QPushButton:hover { background: #505050; }"));
+        button->setProperty("uiRole", "compact");
+        button->setToolTip(QStringLiteral("浏览文件"));
         connect(button, &QPushButton::clicked, this,
                 [this, lineEdit, def]() { browseFile(lineEdit, def.name); });
         layout->addWidget(lineEdit, 1);
@@ -274,11 +277,12 @@ void PropertiesPanel::addParamWidget(const OVP::ParamDef &def)
     if (!editor)
         return;
 
-    editor->setStyleSheet(editor->styleSheet() + QString::fromUtf8(kEditorStyle));
+    editor->setMinimumWidth(0);
+    editor->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
 
     auto *label = new QLabel(def.displayName, this);
-    label->setFont(QFont(QStringLiteral("Microsoft YaHei"), 9));
-    label->setStyleSheet(QStringLiteral("color: #aaaaaa;"));
+    label->setProperty("uiRole", "muted");
+    label->setWordWrap(true);
     if (!def.description.isEmpty())
         label->setToolTip(def.description);
 

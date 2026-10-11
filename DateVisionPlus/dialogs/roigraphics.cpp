@@ -36,12 +36,12 @@ void RoiRectItem::paint(QPainter *painter, const QStyleOptionGraphicsItem *optio
     Q_UNUSED(widget);
     painter->setRenderHint(QPainter::Antialiasing);
 
-    painter->setPen(QPen(QColor(0, 200, 255), 2.0));
-    painter->setBrush(QBrush(QColor(0, 200, 255, 30)));
+    painter->setPen(QPen(QColor(183, 210, 223), 2.0));
+    painter->setBrush(QBrush(QColor(183, 210, 223, 24)));
     painter->drawRect(m_rect);
 
-    painter->setPen(QPen(QColor(0, 200, 255), 1.0));
-    painter->setBrush(QBrush(QColor(0, 200, 255)));
+    painter->setPen(QPen(QColor(183, 210, 223), 1.0));
+    painter->setBrush(QBrush(QColor(183, 210, 223)));
     for (const QRectF &handle : handleRects())
         painter->drawRect(handle);
 

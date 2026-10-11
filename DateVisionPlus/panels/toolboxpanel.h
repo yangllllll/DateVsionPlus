@@ -4,6 +4,8 @@
 #include <QWidget>
 
 class PluginTreeWidget;
+class QLineEdit;
+class QLabel;
 
 namespace Ui {
 class ToolboxPanel;
@@ -26,9 +28,12 @@ signals:
 
 private:
     void loadPlugins();
+    void filterPlugins(const QString &query);
 
     Ui::ToolboxPanel *ui = nullptr;
     PluginTreeWidget *m_tree = nullptr;
+    QLineEdit *m_search = nullptr;
+    QLabel *m_count = nullptr;
 };
 
 #endif // TOOLBOXPANEL_H

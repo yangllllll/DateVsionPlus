@@ -9,16 +9,12 @@ SliderWithValue::SliderWithValue(QWidget *parent)
 {
     auto *layout = new QHBoxLayout(this);
     layout->setContentsMargins(0, 0, 0, 0);
-    layout->setSpacing(4);
+    layout->setSpacing(8);
 
     m_slider = new QSlider(Qt::Horizontal, this);
-    m_slider->setStyleSheet(
-        QStringLiteral("QSlider::groove:horizontal { height: 4px; background: #333; }"
-                       "QSlider::handle:horizontal { width: 12px; margin: -4px 0; "
-                       "background: #0d7377; border-radius: 6px; }"));
-
     m_label = new QLabel(QStringLiteral("0"), this);
-    m_label->setStyleSheet(QStringLiteral("color: #ccc; min-width: 30px; font-size: 11px;"));
+    m_label->setProperty("uiRole", "numeric");
+    m_label->setMinimumWidth(30);
     m_label->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
 
     layout->addWidget(m_slider, 1);

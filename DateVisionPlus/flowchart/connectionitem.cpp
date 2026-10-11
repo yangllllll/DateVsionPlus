@@ -36,10 +36,17 @@ void ConnectionItem::paint(QPainter *painter, const QStyleOptionGraphicsItem *op
     Q_UNUSED(option);
     Q_UNUSED(widget);
     painter->setRenderHint(QPainter::Antialiasing);
-    painter->setPen(QPen(m_isTemp ? QColor(255, 255, 255, 120) : QColor(200, 200, 200, 180),
-                         2.0, m_isTemp ? Qt::DashLine : Qt::SolidLine, Qt::RoundCap));
-    if (!m_isTemp && isSelected())
-        painter->setPen(QPen(QColor(0, 180, 255), 2.5));
+    painter->setBrush(Qt::NoBrush);
+    const bool selected = !m_isTemp && isSelected();
+    if (!m_isTemp) {
+        painter->setPen(QPen(QColor(10, 16, 22), selected ? 4.5 : 3.5,
+                             Qt::SolidLine, Qt::SquareCap));
+        painter->drawPath(m_path);
+    }
+    const QColor lineColor = m_isTemp ? QColor(158, 181, 196, 185)
+        : selected ? QColor(211, 231, 240) : QColor(125, 156, 176);
+    painter->setPen(QPen(lineColor, selected ? 2.2 : 1.6,
+                         m_isTemp ? Qt::DashLine : Qt::SolidLine, Qt::SquareCap));
     painter->drawPath(m_path);
 }
 

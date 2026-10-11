@@ -29,16 +29,17 @@ void PluginTreeWidget::startDrag(Qt::DropActions supportedActions)
     mime->setData(OVP::pluginIdMimeType(), pluginId.toUtf8());
     drag->setMimeData(mime);
 
-    QPixmap pixmap(140, 28);
+    QPixmap pixmap(168, 34);
     pixmap.fill(Qt::transparent);
     QPainter painter(&pixmap);
     painter.setRenderHint(QPainter::Antialiasing);
-    painter.setBrush(QColor(0, 120, 215));
-    painter.setPen(Qt::NoPen);
-    painter.drawRoundedRect(0, 0, 140, 28, 6, 6);
-    painter.setPen(Qt::white);
+    painter.setBrush(QColor(QStringLiteral("#1c2830")));
+    painter.setPen(QColor(QStringLiteral("#b7d2df")));
+    painter.drawRect(pixmap.rect().adjusted(0, 0, -1, -1));
+    painter.fillRect(0, 0, 3, pixmap.height(), QColor(QStringLiteral("#b7d2df")));
+    painter.setPen(QColor(QStringLiteral("#e2ebf0")));
     painter.setFont(QFont(QStringLiteral("Microsoft YaHei"), 9, QFont::Bold));
-    painter.drawText(0, 0, 140, 28, Qt::AlignCenter, item->text(0));
+    painter.drawText(pixmap.rect(), Qt::AlignCenter, item->text(0));
     painter.end();
     drag->setPixmap(pixmap);
     drag->setHotSpot(pixmap.rect().center());

@@ -31,9 +31,6 @@
    </property>
    <item>
     <widget class="QLabel" name="lblTitle">
-     <property name="styleSheet">
-      <string notr="true">QLabel { background: #2d2d30; color: #e0e0e0; padding: 8px 4px; border-bottom: 1px solid #3e3e42; }</string>
-     </property>
      <property name="text">
       <string>  工具箱</string>
      </property>
@@ -41,12 +38,6 @@
    </item>
    <item>
     <widget class="PluginTreeWidget" name="tree">
-     <property name="styleSheet">
-      <string notr="true">QTreeWidget { background: #252526; color: #cccccc; border: none; font-size: 12px; font-family: &quot;Microsoft YaHei&quot;; }
-QTreeWidget::item { padding: 4px 2px; }
-QTreeWidget::item:hover { background: #2a2d2e; }
-QTreeWidget::item:selected { background: #094771; }</string>
-     </property>
      <property name="headerHidden">
       <bool>true</bool>
      </property>

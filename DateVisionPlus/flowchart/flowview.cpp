@@ -6,8 +6,12 @@
 #include <QDragEnterEvent>
 #include <QDropEvent>
 #include <QMimeData>
+#include <QPainter>
 #include <QScrollBar>
+#include <QVarLengthArray>
 #include <QWheelEvent>
+
+#include <cmath>
 
 using namespace OVP;
 
@@ -40,6 +44,37 @@ void FlowView::applySettings()
     setTransformationAnchor(AnchorUnderMouse);
     setResizeAnchor(AnchorUnderMouse);
     setAcceptDrops(true);
+    setFrameShape(QFrame::NoFrame);
+    setBackgroundBrush(QColor(14, 19, 24));
+}
+
+void FlowView::drawBackground(QPainter *painter, const QRectF &rect)
+{
+    painter->fillRect(rect, QColor(14, 19, 24));
+
+    // Keep the drafting dots readable at every zoom level without drawing a
+    // dense mesh when a large flow is fitted into the viewport.
+    const qreal zoom = qMax(qAbs(painter->worldTransform().m11()), 0.001);
+    qreal spacing = 24.0;
+    while (spacing * zoom < 14.0)
+        spacing *= 2.0;
+
+    const qreal left = std::floor(rect.left() / spacing) * spacing;
+    const qreal top = std::floor(rect.top() / spacing) * spacing;
+    QVarLengthArray<QPointF, 1024> points;
+    for (qreal x = left; x <= rect.right(); x += spacing) {
+        for (qreal y = top; y <= rect.bottom(); y += spacing)
+            points.append(QPointF(x, y));
+    }
+
+    painter->save();
+    painter->setRenderHint(QPainter::Antialiasing, false);
+    QPen dotPen(QColor(48, 62, 73));
+    dotPen.setCosmetic(true);
+    dotPen.setWidthF(1.0);
+    painter->setPen(dotPen);
+    painter->drawPoints(points.constData(), points.size());
+    painter->restore();
 }
 
 void FlowView::zoomIn()
