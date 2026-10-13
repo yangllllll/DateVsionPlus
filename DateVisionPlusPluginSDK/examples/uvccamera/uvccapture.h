@@ -22,6 +22,7 @@
 #include <QWaitCondition>
 
 #include <atomic>
+#include <memory>
 
 #include <opencv2/core.hpp>
 #include <opencv2/videoio.hpp>
@@ -88,7 +89,8 @@ public:
      * @brief 等待一帧序号大于 afterSeq 的新图
      * @param timeoutMs 最长等待时间；<= 0 表示不等待，立即返回当前帧
      */
-    bool waitFrame(cv::Mat &out, int timeoutMs, quint64 afterSeq = 0, QString *error = nullptr);
+    bool waitFrame(cv::Mat &out, int timeoutMs, quint64 afterSeq = 0,
+                   QString *error = nullptr, quint64 *seq = nullptr);
 
     quint64 frameSeq() const;
     /** 取图线程实测帧率 */
@@ -106,11 +108,15 @@ protected:
     void run() override;
 
 private:
+    friend class UvcGrabberTest;
+    void prepareFrame(std::shared_ptr<cv::Mat> &frame);
+    void publishFrame(std::shared_ptr<cv::Mat> &frame);
+
     mutable QMutex m_mutex;
     QWaitCondition m_cond;
 
     CameraConfig m_config;
-    cv::Mat m_latest;
+    std::shared_ptr<cv::Mat> m_latest;
     quint64 m_seq = 0;
     double m_fps = 0.0;
     int m_width = 0;

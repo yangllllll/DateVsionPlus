@@ -52,7 +52,7 @@ bool BlobAnalysisPlugin::execute()
         return false;
     }
 
-    cv::Mat gray = ensureGray(image).clone();
+    cv::Mat gray = ensureGray(image);
     if (gray.depth() != CV_8U)
         gray.convertTo(gray, CV_8U);
 
@@ -60,8 +60,11 @@ bool BlobAnalysisPlugin::execute()
     double minVal = 0.0;
     double maxVal = 0.0;
     cv::minMaxLoc(gray, &minVal, &maxVal);
+    cv::Mat binary;
     if (maxVal > minVal)
-        cv::threshold(gray, gray, 0, 255, cv::THRESH_BINARY | cv::THRESH_OTSU);
+        cv::threshold(gray, binary, 0, 255, cv::THRESH_BINARY | cv::THRESH_OTSU);
+    else
+        binary = gray;
 
     const double minArea = paramDouble(QStringLiteral("min_area"), 100.0);
     const double maxArea = paramDouble(QStringLiteral("max_area"), 100000.0);
@@ -71,12 +74,13 @@ bool BlobAnalysisPlugin::execute()
     const cv::Scalar color = bgrColor(paramString(QStringLiteral("contour_color"), QStringLiteral("绿色")));
 
     std::vector<std::vector<cv::Point>> contours;
-    cv::findContours(gray, contours, cv::RETR_EXTERNAL, cv::CHAIN_APPROX_SIMPLE);
+    cv::findContours(binary, contours, cv::RETR_EXTERNAL, cv::CHAIN_APPROX_SIMPLE);
 
     cv::Mat output = ensureBgr(image);
     int validCount = 0;
 
-    for (const std::vector<cv::Point> &cnt : contours) {
+    for (size_t i = 0; i < contours.size(); ++i) {
+        const std::vector<cv::Point> &cnt = contours[i];
         const double area = cv::contourArea(cnt);
         if (area < minArea || area > maxArea)
             continue;
@@ -91,7 +95,7 @@ bool BlobAnalysisPlugin::execute()
         ++validCount;
 
         if (drawContours) {
-            cv::drawContours(output, std::vector<std::vector<cv::Point>>{cnt}, -1, color,
+            cv::drawContours(output, contours, static_cast<int>(i), color,
                              fillContours ? -1 : 2);
 
             const cv::Moments m = cv::moments(cnt);

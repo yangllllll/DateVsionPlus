@@ -19,6 +19,7 @@
  *   -> 主程序目录/snap7 -> 系统 PATH
  */
 
+#include <QByteArray>
 #include <QLibrary>
 #include <QString>
 #include <QStringList>
@@ -50,9 +51,14 @@ enum Area {
 enum WordLen {
     WLBit = 0x01,
     WLByte = 0x02, ///< Python write_area 的默认单位
+    WLChar = 0x03,
     WLWord = 0x04,
+    WLInt = 0x05,
     WLDWord = 0x06,
-    WLReal = 0x08
+    WLDInt = 0x07,
+    WLReal = 0x08,
+    WLCounter = 0x1C,
+    WLTimer = 0x1D
 };
 
 // ------------------------------------------------------------ 函数指针类型
@@ -129,7 +135,7 @@ public:
     Snap7Client();
     ~Snap7Client();
 
-    /** 已连接则返回 true；地址变化时自动重连 */
+    /** 已连接则返回 true；地址、机架或插槽变化时自动重连 */
     bool connectTo(const QString &address, int rack, int slot, QString *error = nullptr);
     void disconnect();
     bool isConnected() const;
@@ -152,6 +158,10 @@ public:
 
 private:
     bool ensureCreated(QString *error);
+    bool writeData(int area, int dbNumber, int start, int wordLen, const char *data,
+                   qsizetype byteCount, QString *error);
+    bool readData(int area, int dbNumber, int start, int amount, int wordLen, void *data,
+                  QString *error);
     /** 错误码 + 上下文 -> 可读文本，并写入 m_lastError */
     QString describe(int code, const QString &context) const;
     bool fail(const QString &message, QString *error);
@@ -159,6 +169,8 @@ private:
     S7Object m_client = 0;
     bool m_created = false;
     QString m_address;
+    int m_rack = -1;
+    int m_slot = -1;
     QString m_lastError;
 };
 

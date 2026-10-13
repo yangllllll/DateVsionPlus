@@ -1,0 +1,11 @@
+TEMPLATE = app
+QT = core
+CONFIG += console c++17
+CONFIG -= app_bundle debug_and_release
+TARGET = plc_tests
+isEmpty(SNAP7_SOURCE_DIR): SNAP7_SOURCE_DIR = $$PWD/..
+INCLUDEPATH += $$SNAP7_SOURCE_DIR
+DESTDIR = $$OUT_PWD/bin
+OBJECTS_DIR = $$OUT_PWD/runner-obj
+SOURCES += tests.cpp $$SNAP7_SOURCE_DIR/snap7client.cpp
+HEADERS += mock.h $$SNAP7_SOURCE_DIR/snap7client.h

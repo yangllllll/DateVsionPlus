@@ -3,8 +3,11 @@
 #include <QCoreApplication>
 #include <QDir>
 #include <QFileInfo>
+#include <QScopeGuard>
 
 #include <cstring>
+#include <limits>
+#include <utility>
 
 #if defined(Q_OS_WIN)
 #  include <windows.h>
@@ -478,6 +481,11 @@ bool DahuaCamera::getFrame(cv::Mat &out, unsigned int timeoutMs, QString *error)
         return fail(detail, error);
     }
 
+    const auto releaseFrame = qScopeGuard([&] {
+        if (api->releaseFrame)
+            api->releaseFrame(m_handle, &frame);
+    });
+
     bool ok = false;
     QString convertError;
 
@@ -488,14 +496,21 @@ bool DahuaCamera::getFrame(cv::Mat &out, unsigned int timeoutMs, QString *error)
     if (frame.pData && width > 0 && height > 0) {
         // Bayer GB8：Python 版直接返回原始单通道数据（该型号相机按灰度使用）
         if (info.pixelFormat == gvspPixelBayGB8) {
-            out.create(height, width, CV_8UC1);
-            std::memcpy(out.data, frame.pData, static_cast<size_t>(width) * height);
-            ok = true;
+            const size_t rowStride = static_cast<size_t>(width) + info.paddingX;
+            const size_t requiredBytes = rowStride * (height - 1) + width;
+            if (requiredBytes > info.size) {
+                convertError = QStringLiteral("帧数据长度不足");
+            } else {
+                out = cv::Mat(height, width, CV_8UC1, frame.pData, rowStride).clone();
+                ok = true;
+            }
         } else {
             // 其它格式统一转成 BGR8 输出
             const size_t dstSize = static_cast<size_t>(width) * height * 3;
-            if (m_convertBuffer.size() < dstSize)
-                m_convertBuffer.resize(dstSize);
+            if (dstSize > (std::numeric_limits<unsigned int>::max)())
+                return fail(QStringLiteral("帧尺寸超出像素转换接口范围"), error);
+            // SDK 直接写入最终图像，省去转换缓存到 Mat 的整帧复制。
+            cv::Mat converted(height, width, CV_8UC3);
 
             IMV_PixelConvertParam param;
             std::memset(&param, 0, sizeof(param));
@@ -508,7 +523,7 @@ bool DahuaCamera::getFrame(cv::Mat &out, unsigned int timeoutMs, QString *error)
             param.nPaddingY = info.paddingY;
             param.eBayerDemosaic = demosaicBilinear;
             param.eDstPixelFormat = gvspPixelBGR8;
-            param.pDstBuf = m_convertBuffer.data();
+            param.pDstBuf = converted.data;
             param.nDstBufSize = static_cast<unsigned int>(dstSize);
 
             const int convertRet = api->pixelConvert(m_handle, &param);
@@ -516,17 +531,13 @@ bool DahuaCamera::getFrame(cv::Mat &out, unsigned int timeoutMs, QString *error)
                 convertError = QStringLiteral("像素格式转换失败: %1（%2）")
                                    .arg(statusText(convertRet)).arg(convertRet);
             } else {
-                out.create(height, width, CV_8UC3);
-                std::memcpy(out.data, m_convertBuffer.data(), dstSize);
+                out = std::move(converted);
                 ok = true;
             }
         }
     } else {
         convertError = QStringLiteral("帧数据为空");
     }
-
-    if (api->releaseFrame)
-        api->releaseFrame(m_handle, &frame);
 
     if (!ok)
         return fail(convertError.isEmpty() ? QStringLiteral("取帧失败") : convertError, error);
@@ -538,14 +549,14 @@ bool DahuaCamera::grab(cv::Mat &out, unsigned int timeoutMs, QString *error)
 {
     // 已在取流（对话框预览）时只取帧，不打断
     const bool alreadyGrabbing = m_grabbing;
-    startGrabbing();
     if (!alreadyGrabbing && !startGrabbing(error))
         return false;
 
-    const bool ok = getFrame(out, timeoutMs, error);
-
-    stopGrabbing();
-    return ok;
+    const auto stopTemporaryStream = qScopeGuard([&] {
+        if (!alreadyGrabbing)
+            stopGrabbing();
+    });
+    return getFrame(out, timeoutMs, error);
 }
 
 void DahuaCamera::setEnumFeature(const char *name, const char *value)

@@ -8,15 +8,19 @@
 #include <QHostAddress>
 #include <QLabel>
 #include <QMessageBox>
+#include <QMutexLocker>
+#include <QPointer>
 #include <QPushButton>
 #include <QTcpServer>
 #include <QTcpSocket>
+#include <QThread>
 #include <QTimer>
 #include <QVBoxLayout>
 
 #include <opencv2/imgcodecs.hpp>
 
 #include <algorithm>
+#include <utility>
 #include <vector>
 
 namespace OVP {
@@ -30,6 +34,8 @@ namespace {
 
 /** WebSocket 握手用的 GUID（RFC 6455） */
 const QByteArray kWebSocketMagic = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
+constexpr qsizetype kMaxHandshakeBytes = 16 * 1024;
+constexpr int kHandshakeTimeoutMs = 5000;
 
 int broadcastInterval(int fps)
 {
@@ -79,23 +85,40 @@ bool WebSocketServerPlugin::execute()
 {
     clearError();
 
-    // 保存当前图像供广播线程使用（对应 Python: self._current_frame = img.copy()）
+    // 流程可在工作线程执行，网络对象仍属于 UI 线程。先复制再换入邮箱，
+    // 不在大图拷贝/编码期间持锁，也不让上游后续原地修改影响已提交图像。
     const cv::Mat image = inputImage(QStringLiteral("input"));
-    m_currentFrame = image.empty() ? cv::Mat() : image.clone();
+    cv::Mat snapshot = image.clone();
+    {
+        QMutexLocker locker(&m_frameMutex);
+        std::swap(m_currentFrame, snapshot);
+        ++m_frameRevision;
+    }
 
     // 透传图像 + 客户端数量
     setOutput(QStringLiteral("output"), imageValue(image));
     setOutput(QStringLiteral("client_count"), clientCount());
 
-    if (paramBool(QStringLiteral("auto_start"), true))
-        restartIfNeeded();
+    if (paramBool(QStringLiteral("auto_start"), true)) {
+        requestRestart(paramInt(QStringLiteral("port"), 9000),
+                       paramInt(QStringLiteral("fps"), 30));
+    }
+
+    {
+        QMutexLocker locker(&m_frameMutex);
+        // 网络回调只写自己的错误邮箱，不与 execute 竞争 PluginBase::lastError。
+        if (!m_serverError.isEmpty())
+            setError(m_serverError);
+        else if (!m_encodingError.isEmpty())
+            setError(m_encodingError);
+    }
 
     return true;
 }
 
 QVariantMap WebSocketServerPlugin::extraData() const
 {
-    return {{QStringLiteral("running"), m_running}};
+    return {{QStringLiteral("running"), isRunning()}};
 }
 
 void WebSocketServerPlugin::setExtraData(const QVariantMap &data)
@@ -110,26 +133,61 @@ void WebSocketServerPlugin::setExtraData(const QVariantMap &data)
 
 bool WebSocketServerPlugin::startServer(QString *error)
 {
-    const int port = paramInt(QStringLiteral("port"), 9000);
+    if (QThread::currentThread() != thread()) {
+        if (error)
+            *error = QStringLiteral("请在插件所属线程启动 WebSocket 服务");
+        return false;
+    }
+    {
+        QMutexLocker locker(&m_frameMutex);
+        // 手动启动采用当前参数，先前排队的自动启动不能覆盖本次选择。
+        ++m_controlGeneration;
+        m_restartQueued = false;
+    }
+    return startServerWithSettings(paramInt(QStringLiteral("port"), 9000),
+                                   paramInt(QStringLiteral("fps"), 30), error);
+}
 
-    if (m_running && m_server && m_server->isListening() && m_listenPort == port)
+bool WebSocketServerPlugin::startServerWithSettings(int port, int fps, QString *error)
+{
+    const int interval = broadcastInterval(fps);
+    if (error)
+        error->clear();
+
+    if (m_running && m_server && m_server->isListening() && m_listenPort == port) {
+        if (m_broadcastTimer->interval() != interval)
+            m_broadcastTimer->setInterval(interval);
+        m_broadcastInterval = interval;
         return true;
+    }
 
-    stopServer(); // 端口变化或上次监听失败，重新绑定
+    closeServer(); // 保留后续已排队的配置更新，只重新绑定网络对象
 
     if (!m_server) {
         m_server = new QTcpServer(this);
         connect(m_server, &QTcpServer::newConnection, this, &WebSocketServerPlugin::onNewConnection);
     }
 
-    if (!m_server->listen(QHostAddress::Any, static_cast<quint16>(port))) {
+    if (port < 1 || port > 65535 ||
+        !m_server->listen(QHostAddress::Any, static_cast<quint16>(port))) {
         const QString message =
-            QStringLiteral("WebSocket 启动失败: %1（端口 %2）").arg(m_server->errorString()).arg(port);
+            QStringLiteral("WebSocket 启动失败: %1（端口 %2）")
+                .arg(port < 1 || port > 65535 ? QStringLiteral("端口超出范围")
+                                           : m_server->errorString())
+                .arg(port);
         if (error)
             *error = message;
-        setError(message);
+        {
+            QMutexLocker locker(&m_frameMutex);
+            m_serverError = message;
+        }
         m_server->close();
         return false;
+    }
+
+    {
+        QMutexLocker locker(&m_frameMutex);
+        m_serverError.clear();
     }
 
     m_listenPort = port;
@@ -140,14 +198,33 @@ bool WebSocketServerPlugin::startServer(QString *error)
         m_broadcastTimer->setTimerType(Qt::CoarseTimer);
         connect(m_broadcastTimer, &QTimer::timeout, this, &WebSocketServerPlugin::onBroadcast);
     }
-    m_broadcastTimer->start(broadcastInterval(paramInt(QStringLiteral("fps"), 30)));
+    m_broadcastTimer->start(interval);
+    m_broadcastInterval = interval;
 
     return true;
 }
 
 void WebSocketServerPlugin::stopServer()
 {
+    if (QThread::currentThread() != thread()) {
+        QMetaObject::invokeMethod(this, &WebSocketServerPlugin::stopServer, Qt::QueuedConnection);
+        return;
+    }
+
+    {
+        QMutexLocker locker(&m_frameMutex);
+        // 手动停止之后，先前 execute 排队的自动启动不应让服务重新启动。
+        ++m_controlGeneration;
+        m_restartQueued = false;
+        m_serverError.clear();
+    }
+    closeServer();
+}
+
+void WebSocketServerPlugin::closeServer()
+{
     m_running = false;
+    m_clientCount = 0;
 
     if (m_broadcastTimer)
         m_broadcastTimer->stop();
@@ -157,36 +234,52 @@ void WebSocketServerPlugin::stopServer()
 
     for (QTcpSocket *socket : m_clients) {
         socket->disconnect(this);
-        socket->close();
+        socket->abort();
         socket->deleteLater();
     }
     m_clients.clear();
 
     for (QTcpSocket *socket : m_handshaking.keys()) {
         socket->disconnect(this);
-        socket->close();
+        socket->abort();
         socket->deleteLater();
     }
     m_handshaking.clear();
 }
 
-void WebSocketServerPlugin::restartIfNeeded()
+void WebSocketServerPlugin::requestRestart(int port, int fps)
 {
-    const int port = paramInt(QStringLiteral("port"), 9000);
-    const int interval = broadcastInterval(paramInt(QStringLiteral("fps"), 30));
-
-    if (m_running && m_listenPort == port) {
-        if (m_broadcastTimer && m_broadcastTimer->interval() != interval)
-            m_broadcastTimer->setInterval(interval);
-        return;
+    quint64 generation;
+    {
+        QMutexLocker locker(&m_frameMutex);
+        m_requestedPort = port;
+        m_requestedFps = fps;
+        if (m_restartQueued)
+            return;
+        if (m_running && m_listenPort == port && m_broadcastInterval == broadcastInterval(fps))
+            return;
+        generation = m_controlGeneration;
+        m_restartQueued = true;
     }
 
-    if (!paramBool(QStringLiteral("auto_start"), true))
-        return;
+    auto apply = [this, generation]() {
+        int port;
+        int fps;
+        {
+            QMutexLocker locker(&m_frameMutex);
+            if (generation != m_controlGeneration)
+                return;
+            m_restartQueued = false;
+            port = m_requestedPort;
+            fps = m_requestedFps;
+        }
+        startServerWithSettings(port, fps, nullptr);
+    };
 
-    QString error;
-    if (!startServer(&error))
-        setError(error);
+    if (QThread::currentThread() == thread())
+        apply();
+    else
+        QMetaObject::invokeMethod(this, std::move(apply), Qt::QueuedConnection);
 }
 
 // ------------------------------------------------------------------ 连接管理
@@ -194,9 +287,18 @@ void WebSocketServerPlugin::restartIfNeeded()
 void WebSocketServerPlugin::onNewConnection()
 {
     while (QTcpSocket *socket = m_server->nextPendingConnection()) {
+        // 立即登记无数据连接，确保 stopServer 也能回收它们。
+        m_handshaking.insert(socket, QByteArray());
+        socket->setReadBufferSize(kMaxHandshakeBytes);
         connect(socket, &QTcpSocket::readyRead, this, &WebSocketServerPlugin::onSocketReadyRead);
         connect(socket, &QTcpSocket::disconnected, this, &WebSocketServerPlugin::onSocketDisconnected);
         connect(socket, &QAbstractSocket::errorOccurred, this, &WebSocketServerPlugin::onSocketError);
+        QTimer::singleShot(kHandshakeTimeoutMs, socket, [this, socket]() {
+            if (m_handshaking.contains(socket))
+                socket->abort();
+        });
+        if (socket->bytesAvailable() > 0)
+            handshake(socket);
     }
 }
 
@@ -234,24 +336,29 @@ void WebSocketServerPlugin::onSocketError()
         return;
 
     removeClient(socket);
-    if (socket->state() != QAbstractSocket::ConnectedState)
-        socket->deleteLater();
+    socket->abort();
+    socket->deleteLater();
 }
 
 void WebSocketServerPlugin::removeClient(QTcpSocket *socket)
 {
     m_clients.removeAll(socket);
     m_handshaking.remove(socket);
+    m_clientCount = static_cast<int>(m_clients.size());
 }
 
 bool WebSocketServerPlugin::handshake(QTcpSocket *socket)
 {
-    QByteArray buffer = m_handshaking.value(socket);
+    QByteArray &buffer = m_handshaking[socket];
     buffer.append(socket->readAll());
 
-    const int headerEnd = buffer.indexOf("\r\n\r\n");
+    const qsizetype headerEnd = buffer.indexOf("\r\n\r\n");
+    if ((headerEnd < 0 && buffer.size() >= kMaxHandshakeBytes) ||
+        headerEnd > kMaxHandshakeBytes - 4) {
+        socket->abort();
+        return false;
+    }
     if (headerEnd < 0) { // 请求头未收全，等下一次 readyRead
-        m_handshaking.insert(socket, buffer);
         return false;
     }
 
@@ -283,36 +390,57 @@ bool WebSocketServerPlugin::handshake(QTcpSocket *socket)
                                 accept + "\r\n\r\n";
     socket->write(response);
     m_clients.append(socket);
+    m_clientCount = static_cast<int>(m_clients.size());
 
     return true;
 }
 
 // -------------------------------------------------------------------- 广播
 
-QByteArray WebSocketServerPlugin::encodeCurrentFrame() const
+const QByteArray &WebSocketServerPlugin::encodedCurrentFrame()
 {
-    if (m_currentFrame.empty())
-        return QByteArray();
-
+    const int quality = std::clamp(paramInt(QStringLiteral("quality"), 80), 10, 100);
     cv::Mat image;
-    if (m_currentFrame.channels() == 1)
-        cv::cvtColor(m_currentFrame, image, cv::COLOR_GRAY2BGR);
-    else if (m_currentFrame.channels() == 4)
-        cv::cvtColor(m_currentFrame, image, cv::COLOR_BGRA2BGR);
-    else
+    quint64 revision;
+    {
+        QMutexLocker locker(&m_frameMutex);
+        revision = m_frameRevision;
+        if (revision == m_encodedRevision && quality == m_encodedQuality)
+            return m_encodedFrame;
         image = m_currentFrame;
+    }
 
-    const int quality = paramInt(QStringLiteral("quality"), 80);
-    std::vector<uchar> buffer;
-    const std::vector<int> params = {cv::IMWRITE_JPEG_QUALITY, quality};
-    if (!cv::imencode(".jpg", image, buffer, params))
-        return QByteArray();
-
-    return QByteArray(reinterpret_cast<const char *>(buffer.data()), static_cast<int>(buffer.size()))
-        .toBase64();
+    m_encodedRevision = revision;
+    m_encodedQuality = quality;
+    m_encodedFrame.clear();
+    QString error;
+    if (!image.empty()) {
+        try {
+            // JPEG 原生支持灰度，无须先复制扩展到三通道。
+            if (image.channels() == 4)
+                cv::cvtColor(image, image, cv::COLOR_BGRA2BGR);
+            const std::vector<int> params = {cv::IMWRITE_JPEG_QUALITY, quality};
+            if (cv::imencode(".jpg", image, m_jpegBuffer, params)) {
+                const QByteArray payload = QByteArray::fromRawData(
+                    reinterpret_cast<const char *>(m_jpegBuffer.data()),
+                    static_cast<qsizetype>(m_jpegBuffer.size())).toBase64();
+                m_encodedFrame = textFrame(payload);
+            } else {
+                error = QStringLiteral("WebSocket JPEG 编码失败");
+            }
+        } catch (const cv::Exception &exception) {
+            error = QStringLiteral("WebSocket JPEG 编码失败: %1")
+                        .arg(QString::fromUtf8(exception.what()));
+        }
+    }
+    {
+        QMutexLocker locker(&m_frameMutex);
+        m_encodingError = error;
+    }
+    return m_encodedFrame;
 }
 
-void WebSocketServerPlugin::sendTextFrame(QTcpSocket *socket, const QByteArray &payload) const
+QByteArray WebSocketServerPlugin::textFrame(const QByteArray &payload)
 {
     QByteArray frame;
     frame.reserve(payload.size() + 10);
@@ -332,7 +460,7 @@ void WebSocketServerPlugin::sendTextFrame(QTcpSocket *socket, const QByteArray &
     }
 
     frame.append(payload);
-    socket->write(frame);
+    return frame;
 }
 
 void WebSocketServerPlugin::onBroadcast()
@@ -340,16 +468,22 @@ void WebSocketServerPlugin::onBroadcast()
     if (m_clients.isEmpty())
         return;
 
-    const QByteArray payload = encodeCurrentFrame();
-    if (payload.isEmpty())
+    // 实时流只发送最新帧，慢客户端最多积压一个应用帧。
+    // 全部客户端拥堵时跳过编码，防止无收益的 JPEG/base64 工作。
+    QList<QTcpSocket *> ready;
+    for (QTcpSocket *socket : std::as_const(m_clients)) {
+        if (socket->state() == QAbstractSocket::ConnectedState && socket->bytesToWrite() == 0)
+            ready.append(socket);
+    }
+    if (ready.isEmpty())
         return;
 
-    const QList<QTcpSocket *> sockets = m_clients; // 拷贝一份，发送过程中可能被移除
-    for (QTcpSocket *socket : sockets) {
-        if (socket->state() != QAbstractSocket::ConnectedState)
-            continue;
-        sendTextFrame(socket, payload);
-    }
+    const QByteArray &frame = encodedCurrentFrame();
+    if (frame.isEmpty())
+        return;
+
+    for (QTcpSocket *socket : std::as_const(ready))
+        socket->write(frame);
 }
 
 } // namespace OVP
@@ -387,12 +521,16 @@ public:
         layout->addWidget(closeButton);
 
         connect(startButton, &QPushButton::clicked, this, [this]() {
+            if (!m_plugin)
+                return;
             QString error;
             if (!m_plugin->startServer(&error))
                 QMessageBox::warning(this, QStringLiteral("图像流推送"), error);
             refresh();
         });
         connect(stopButton, &QPushButton::clicked, this, [this]() {
+            if (!m_plugin)
+                return;
             m_plugin->stopServer();
             refresh();
         });
@@ -408,6 +546,10 @@ public:
 private:
     void refresh()
     {
+        if (!m_plugin) {
+            m_statusLabel->setText(QStringLiteral("插件已移除"));
+            return;
+        }
         m_statusLabel->setText(QStringLiteral("状态: %1\n监听端口: %2\n客户端数: %3")
                                    .arg(m_plugin->isRunning() ? QStringLiteral("运行中")
                                                               : QStringLiteral("已停止"))
@@ -415,7 +557,7 @@ private:
                                    .arg(m_plugin->clientCount()));
     }
 
-    OVP::WebSocketServerPlugin *m_plugin = nullptr;
+    QPointer<OVP::WebSocketServerPlugin> m_plugin;
     QLabel *m_statusLabel = nullptr;
 };
 

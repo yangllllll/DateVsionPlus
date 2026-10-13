@@ -2,6 +2,7 @@
 
 #include <QDeadlineTimer>
 #include <QElapsedTimer>
+#include <QScopeGuard>
 #include <QtGlobal>
 
 #include <memory>
@@ -91,7 +92,7 @@ bool UvcGrabber::startGrab(QString *error)
         m_started = false;
         m_seq = 0;
         m_fps = 0.0;
-        m_latest = cv::Mat();
+        m_latest.reset();
     }
 
     m_stop.store(false);
@@ -138,22 +139,32 @@ bool UvcGrabber::isGrabbing() const
 
 bool UvcGrabber::lastFrame(cv::Mat &out, quint64 *seq) const
 {
-    QMutexLocker locker(&m_mutex);
-    if (m_latest.empty())
-        return false;
+    std::shared_ptr<const cv::Mat> snapshot;
+    {
+        QMutexLocker locker(&m_mutex);
+        if (!m_latest || m_latest->empty())
+            return false;
 
-    out = m_latest.clone();
-    if (seq)
-        *seq = m_seq;
+        snapshot = m_latest;
+        if (seq)
+            *seq = m_seq;
+    }
+    // 发布后的帧不再修改，引用计数保证解锁后仍有效；输出独立副本供下游修改。
+    const auto releaseSnapshot = qScopeGuard([&] {
+        QMutexLocker locker(&m_mutex);
+        snapshot.reset();
+    });
+    out = snapshot->clone();
     return true;
 }
 
-bool UvcGrabber::waitFrame(cv::Mat &out, int timeoutMs, quint64 afterSeq, QString *error)
+bool UvcGrabber::waitFrame(cv::Mat &out, int timeoutMs, quint64 afterSeq,
+                          QString *error, quint64 *seq)
 {
     QDeadlineTimer deadline(timeoutMs);
     QMutexLocker locker(&m_mutex);
 
-    while (m_seq <= afterSeq && m_error.isEmpty()) {
+    while (m_seq <= afterSeq && m_error.isEmpty() && !m_stop.load()) {
         if (timeoutMs <= 0)
             break;
         if (!m_cond.wait(&m_mutex, deadline))
@@ -176,8 +187,37 @@ bool UvcGrabber::waitFrame(cv::Mat &out, int timeoutMs, quint64 afterSeq, QStrin
         return false;
     }
 
-    out = m_latest.clone();
+    std::shared_ptr<const cv::Mat> snapshot = m_latest;
+    if (seq)
+        *seq = m_seq;
+    locker.unlock();
+    const auto releaseSnapshot = qScopeGuard([&] {
+        QMutexLocker snapshotLocker(&m_mutex);
+        snapshot.reset();
+    });
+    out = snapshot->clone();
     return true;
+}
+
+void UvcGrabber::prepareFrame(std::shared_ptr<cv::Mat> &frame)
+{
+    // frame 已移出最新帧槽，不会再有新读者；仅在现有读者全部退出后复用。
+    // 慢读者仍持有时另配一帧，不保留无限增长的空闲缓存池。
+    // 与读者释放快照同步，像素读取完成后才允许写入复用的缓冲区。
+    QMutexLocker locker(&m_mutex);
+    if (!frame || frame.use_count() != 1)
+        frame = std::make_shared<cv::Mat>();
+}
+
+void UvcGrabber::publishFrame(std::shared_ptr<cv::Mat> &frame)
+{
+    // 帧发布只交换所有权，不在采集锁内复制图像。
+    QMutexLocker locker(&m_mutex);
+    m_latest.swap(frame);
+    ++m_seq;
+    m_width = m_latest->cols;
+    m_height = m_latest->rows;
+    m_cond.wakeAll();
 }
 
 quint64 UvcGrabber::frameSeq() const
@@ -281,14 +321,15 @@ void UvcGrabber::run()
         m_cond.wakeAll();
     }
 
-    cv::Mat frame;
+    std::shared_ptr<cv::Mat> frame;
     int failures = 0;
     quint64 counted = 0;
     QElapsedTimer fpsTimer;
     fpsTimer.start();
 
     while (!m_stop.load(std::memory_order_relaxed)) {
-        if (!cap->read(frame) || frame.empty()) {
+        prepareFrame(frame);
+        if (!cap->read(*frame) || frame->empty()) {
             if (++failures >= kMaxConsecutiveFailures) {
                 QMutexLocker locker(&m_mutex);
                 m_error = QStringLiteral("连续取帧失败，摄像头可能已断开");
@@ -300,14 +341,8 @@ void UvcGrabber::run()
         }
         failures = 0;
 
-        {
-            QMutexLocker locker(&m_mutex);
-            frame.copyTo(m_latest);
-            ++m_seq;
-            m_width = frame.cols;
-            m_height = frame.rows;
-            m_cond.wakeAll();
-        }
+        // 交换采集/最新帧缓冲区；prepareFrame 保证下一次 read 不覆盖读者的像素。
+        publishFrame(frame);
 
         if (++counted >= 30) {
             const double elapsed = fpsTimer.elapsed() / 1000.0;

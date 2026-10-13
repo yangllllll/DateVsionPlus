@@ -56,9 +56,12 @@ bool MeasurePlugin::execute()
     double minVal = 0.0;
     double maxVal = 0.0;
     cv::minMaxLoc(gray, &minVal, &maxVal);
-    cv::Mat binary = gray;
+    // 独立目标缓冲区，避免单通道输入经浅拷贝后被二值化修改。
+    cv::Mat binary;
     if (maxVal > minVal)
         cv::threshold(gray, binary, 0, 255, cv::THRESH_BINARY | cv::THRESH_OTSU);
+    else
+        binary = gray;
 
     cv::Mat output = ensureBgr(image);
 

@@ -87,6 +87,8 @@ private:
     void collectGraph(QMap<QString, OVP::PluginBase *> &plugins, QList<OVP::LinkDef> &links) const;
     /** 执行期间禁用会破坏图结构的编辑操作，避免后台线程持有悬空指针 */
     void updateBusyUi();
+    /** 按显示节拍消费最近一轮结果；计算与通信仍逐轮完成。 */
+    void presentExecutionResults();
 
     QString buildCommResponse(const QMap<QString, QVariant> &results);
     QString evalFormatLine(const QString &line, const QMap<QString, QVariant> &results);
@@ -99,6 +101,8 @@ private:
     QThread *m_workerThread = nullptr;
     OVP::ExecutionWorker *m_worker = nullptr;
     bool m_executing = false;
+    bool m_graphDirty = true;
+    bool m_editing = false;
 
     QTimer *m_continuousTimer = nullptr;
     bool m_continuousMode = false;
@@ -112,6 +116,11 @@ private:
     QLabel *m_cycleTime = nullptr;
     QLabel *m_runResult = nullptr;
     QElapsedTimer m_executionClock;
+    QElapsedTimer m_presentationClock;
+    QMap<QString, QVariant> m_latestResults;
+    QStringList m_latestOrder;
+    qint64 m_latestElapsedMs = 0;
+    bool m_presentationPending = false;
     bool m_stopRequested = false;
 };
 

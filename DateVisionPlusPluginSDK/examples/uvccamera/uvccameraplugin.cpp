@@ -80,7 +80,10 @@ UVC::CameraConfig UvcCameraPlugin::configFromParams() const
 bool UvcCameraPlugin::ensureStarted(QString *error)
 {
     m_grabber.setConfig(configFromParams());
-    return m_grabber.startGrab(error);
+    if (!m_grabber.startGrab(error))
+        return false;
+    m_lastSeq = 0;
+    return true;
 }
 
 bool UvcCameraPlugin::execute()
@@ -98,15 +101,16 @@ bool UvcCameraPlugin::execute()
     const bool waitNew = paramBool(QStringLiteral("wait_new_frame"), true);
 
     cv::Mat frame;
+    quint64 frameSeq = 0;
     if (waitNew) {
         // 只等「比上次更新」的那一帧，杜绝过时图像
-        if (!m_grabber.waitFrame(frame, timeout, m_lastSeq, &error)) {
+        if (!m_grabber.waitFrame(frame, timeout, m_lastSeq, &error, &frameSeq)) {
             setError(QStringLiteral("取帧失败: %1").arg(error));
             return false;
         }
-    } else if (!m_grabber.lastFrame(frame, nullptr)) {
+    } else if (!m_grabber.lastFrame(frame, &frameSeq)) {
         // 后台线程还没出图，给一次带超时的机会
-        if (!m_grabber.waitFrame(frame, timeout, 0, &error)) {
+        if (!m_grabber.waitFrame(frame, timeout, 0, &error, &frameSeq)) {
             setError(QStringLiteral("取帧失败: %1").arg(error));
             return false;
         }
@@ -117,7 +121,7 @@ bool UvcCameraPlugin::execute()
         return false;
     }
 
-    m_lastSeq = m_grabber.frameSeq();
+    m_lastSeq = frameSeq;
     setOutput(QStringLiteral("output"), imageValue(frame));
 
     return true;

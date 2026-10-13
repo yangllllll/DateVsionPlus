@@ -58,10 +58,11 @@ void OutputPanel::log(const QString &message, const QString &color)
 {
     m_pending.append({message, color});
 
-    // 缓冲量过大时立即落盘，避免连续运行模式下内存无上限增长
+    // 缓冲量过大时立即刷新，避免连续运行模式下内存无上限增长
     if (m_pending.size() >= 64)
         flushLog();
-    else
+    // 以第一条待刷新日志为起点计时，持续有日志时也能按时显示。
+    else if (!m_flushTimer->isActive())
         m_flushTimer->start();
 }
 
@@ -119,10 +120,19 @@ void OutputPanel::updateResults(const QMap<QString, QVariant> &results)
         total += it.value().toMap().size();
     }
 
-    // 一次性定好行数再填值：逐行 insertRow 会让表格反复重算布局
+    // 连续运行时复用已有单元格，只更新变化的文本，避免清空模型和逐轮分配。
+    const bool updatesEnabled = ui->tblResults->updatesEnabled();
     ui->tblResults->setUpdatesEnabled(false);
-    ui->tblResults->clearContents();
-    ui->tblResults->setRowCount(total);
+    if (ui->tblResults->rowCount() != total)
+        ui->tblResults->setRowCount(total);
+
+    const auto setCellText = [this](int row, int column, const QString &text) {
+        QTableWidgetItem *item = ui->tblResults->item(row, column);
+        if (!item)
+            ui->tblResults->setItem(row, column, new QTableWidgetItem(text));
+        else if (item->text() != text)
+            item->setText(text);
+    };
 
     int row = 0;
     for (auto it = results.constBegin(); it != results.constEnd(); ++it) {
@@ -134,19 +144,19 @@ void OutputPanel::updateResults(const QMap<QString, QVariant> &results)
 
         const QVariantMap outputs = it.value().toMap();
         for (auto o = outputs.constBegin(); o != outputs.constEnd(); ++o) {
-            ui->tblResults->setItem(row, 0, new QTableWidgetItem(nodeId));
-            ui->tblResults->setItem(row, 1, new QTableWidgetItem(o.key()));
-            ui->tblResults->setItem(row, 2,
-                                    new QTableWidgetItem(OVP::portValueToString(o.value())));
+            setCellText(row, 0, nodeId);
+            setCellText(row, 1, o.key());
+            setCellText(row, 2, OVP::portValueToString(o.value()));
             ++row;
         }
     }
 
-    ui->tblResults->setUpdatesEnabled(true);
+    ui->tblResults->setUpdatesEnabled(updatesEnabled);
 }
 
 void OutputPanel::clearLog()
 {
+    m_flushTimer->stop();
     m_pending.clear();
     ui->txtLog->clear();
     ui->tblResults->setRowCount(0);

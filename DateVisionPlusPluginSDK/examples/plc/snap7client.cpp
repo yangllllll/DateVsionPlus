@@ -4,6 +4,9 @@
 #include <QDir>
 #include <QFileInfo>
 
+#include <limits>
+#include <utility>
+
 #if defined(Q_OS_WIN)
 static const char *const kLibraryName = "snap7.dll";
 #else
@@ -39,6 +42,30 @@ void appendUnique(QStringList &list, const QString &value)
 {
     if (!value.isEmpty() && !list.contains(value))
         list.append(value);
+}
+
+// Snap7 interprets Amount as an element count, and CT/TM override WordLen.
+int elementSize(int area, int wordLen)
+{
+    if (area == AreaCT || area == AreaTM)
+        return 2;
+    switch (wordLen) {
+    case WLBit:
+    case WLByte:
+    case WLChar:
+        return 1;
+    case WLWord:
+    case WLInt:
+    case WLCounter:
+    case WLTimer:
+        return 2;
+    case WLDWord:
+    case WLDInt:
+    case WLReal:
+        return 4;
+    default:
+        return 0;
+    }
 }
 
 } // namespace
@@ -197,9 +224,9 @@ bool Snap7Client::ensureCreated(QString *error)
         return true;
 
     m_client = api->create();
-    m_created = true;
     if (m_client == 0)
         return fail(QStringLiteral("snap7 Cli_Create 返回空句柄"), error);
+    m_created = true;
     return true;
 }
 
@@ -210,8 +237,7 @@ bool Snap7Client::isConnected() const
         return false;
 
     int connected = 0;
-    api->getConnected(m_client, &connected);
-    return connected != 0;
+    return api->getConnected(m_client, &connected) == 0 && connected != 0;
 }
 
 bool Snap7Client::connectTo(const QString &address, int rack, int slot, QString *error)
@@ -219,12 +245,17 @@ bool Snap7Client::connectTo(const QString &address, int rack, int slot, QString 
     if (!ensureCreated(error))
         return false;
 
-    // 已连接且地址未变则直接复用（Python: if not get_connected(): connect(...)）
-    if (isConnected() && m_address == address)
+    // Query once; a connection identifies the complete (IP, rack, slot) target.
+    const bool connected = isConnected();
+    if (connected && m_address == address && m_rack == rack && m_slot == slot)
         return true;
 
-    if (isConnected())
+    if (connected)
         disconnect();
+
+    m_address.clear();
+    m_rack = -1;
+    m_slot = -1;
 
     Snap7Api *api = Snap7Api::instance();
     const QByteArray ipBytes = address.toUtf8();
@@ -236,6 +267,8 @@ bool Snap7Client::connectTo(const QString &address, int rack, int slot, QString 
     }
 
     m_address = address;
+    m_rack = rack;
+    m_slot = slot;
     m_lastError.clear();
     return true;
 }
@@ -246,17 +279,31 @@ void Snap7Client::disconnect()
     if (m_created && api->isLoaded() && api->disconnect)
         api->disconnect(m_client);
     m_address.clear();
+    m_rack = -1;
+    m_slot = -1;
 }
 
 bool Snap7Client::writeArea(int area, int dbNumber, int start, int wordLen, const QByteArray &data,
                             QString *error)
 {
+    return writeData(area, dbNumber, start, wordLen, data.constData(), data.size(), error);
+}
+
+bool Snap7Client::writeData(int area, int dbNumber, int start, int wordLen, const char *data,
+                            qsizetype byteCount, QString *error)
+{
     Snap7Api *api = Snap7Api::instance();
     if (!api->isLoaded() || !m_created)
         return fail(QStringLiteral("PLC 未连接"), error);
 
-    const int code = api->writeArea(m_client, area, dbNumber, start, data.size(), wordLen,
-                                    const_cast<char *>(data.constData()));
+    const int bytesPerElement = elementSize(area, wordLen);
+    if (bytesPerElement == 0 || byteCount <= 0 || byteCount % bytesPerElement != 0 ||
+        byteCount / bytesPerElement > std::numeric_limits<int>::max())
+        return fail(QStringLiteral("PLC 写入数据长度必须是有效字长的正整数倍"), error);
+
+    const int amount = static_cast<int>(byteCount / bytesPerElement);
+    const int code = api->writeArea(m_client, area, dbNumber, start, amount, wordLen,
+                                    const_cast<char *>(data));
     if (code != 0) {
         fail(describe(code, QStringLiteral("写区域 area=0x%1 db=%2 start=%3")
                                 .arg(area, 2, 16, QLatin1Char('0'))
@@ -270,12 +317,36 @@ bool Snap7Client::writeArea(int area, int dbNumber, int start, int wordLen, cons
 
 bool Snap7Client::writeByte(int area, int dbNumber, int start, quint8 value, QString *error)
 {
-    return writeArea(area, dbNumber, start, WLByte,
-                     QByteArray(1, static_cast<char>(value)), error);
+    // The synchronous Snap7 call consumes this byte before returning.
+    const char data = static_cast<char>(value);
+    return writeData(area, dbNumber, start, WLByte, &data, 1, error);
 }
 
 bool Snap7Client::readArea(int area, int dbNumber, int start, int amount, int wordLen,
                            QByteArray *out, QString *error)
+{
+    const int bytesPerElement = elementSize(area, wordLen);
+    if (bytesPerElement == 0 || amount <= 0 ||
+        amount > std::numeric_limits<int>::max() / bytesPerElement)
+        return fail(QStringLiteral("PLC 读取数量或字长无效，或数据长度超出范围"), error);
+
+    Snap7Api *api = Snap7Api::instance();
+    if (!api->isLoaded() || !m_created)
+        return fail(QStringLiteral("PLC 未连接"), error);
+    if (!api->readArea)
+        return fail(QStringLiteral("当前 snap7.dll 未提供 Cli_ReadArea，无法读回数据"), error);
+
+    // Snap7 fills the entire buffer on success; failed reads never publish it.
+    QByteArray buffer(amount * bytesPerElement, Qt::Uninitialized);
+    if (!readData(area, dbNumber, start, amount, wordLen, buffer.data(), error))
+        return false;
+    if (out)
+        *out = std::move(buffer);
+    return true;
+}
+
+bool Snap7Client::readData(int area, int dbNumber, int start, int amount, int wordLen,
+                           void *data, QString *error)
 {
     Snap7Api *api = Snap7Api::instance();
     if (!api->readArea)
@@ -283,9 +354,8 @@ bool Snap7Client::readArea(int area, int dbNumber, int start, int amount, int wo
     if (!api->isLoaded() || !m_created)
         return fail(QStringLiteral("PLC 未连接"), error);
 
-    QByteArray buffer(amount, '\0');
     const int code = api->readArea(m_client, area, dbNumber, start, amount, wordLen,
-                                   buffer.data());
+                                   data);
     if (code != 0) {
         fail(describe(code, QStringLiteral("读区域 area=0x%1 db=%2 start=%3")
                                 .arg(area, 2, 16, QLatin1Char('0'))
@@ -294,18 +364,18 @@ bool Snap7Client::readArea(int area, int dbNumber, int start, int amount, int wo
              error);
         return false;
     }
-    if (out)
-        *out = buffer;
     return true;
 }
 
 bool Snap7Client::readByte(int area, int dbNumber, int start, quint8 *value, QString *error)
 {
-    QByteArray buffer;
-    if (!readArea(area, dbNumber, start, 1, WLByte, &buffer, error))
+    if (elementSize(area, WLByte) != 1)
+        return fail(QStringLiteral("计数器和定时器区域不支持单字节读取"), error);
+    quint8 data = 0;
+    if (!readData(area, dbNumber, start, 1, WLByte, &data, error))
         return false;
-    if (value && !buffer.isEmpty())
-        *value = static_cast<quint8>(buffer.at(0));
+    if (value)
+        *value = data;
     return true;
 }
 

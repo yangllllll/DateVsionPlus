@@ -250,7 +250,7 @@ bool LineFinderPlugin::execute()
         edgeT2 = m_learnedThresholds.value(1, static_cast<int>(edgeT2));
     } else if (learnMode && !m_rois.isEmpty()) {
         for (const QRect &roi : m_rois)
-            autoLearn(image, roi);
+            autoLearn(gray, roi);
         if (!m_learnedThresholds.isEmpty()) {
             edgeT1 = m_learnedThresholds.value(0, static_cast<int>(edgeT1));
             edgeT2 = m_learnedThresholds.value(1, static_cast<int>(edgeT2));

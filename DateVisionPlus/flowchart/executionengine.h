@@ -5,7 +5,6 @@
 
 #include <QList>
 #include <QMap>
-#include <QMultiHash>
 #include <QObject>
 #include <QString>
 #include <QStringList>
@@ -48,11 +47,13 @@ public:
 
     void setup(const QMap<QString, PluginBase *> &plugins, const QList<LinkDef> &links);
 
-    /** 拓扑排序结果；存在环时返回空列表。结果会被缓存，重复调用无开销 */
+    /** 拓扑排序结果；存在环时返回空列表。无环与有环结果均缓存到下次 setup() */
     QStringList topologicalSort() const;
     bool hasCycle() const;
 
-    QMap<QString, QVariant> execute();
+    /** 在投递后台任务前调用，防止排队期间收到的停止请求被 execute() 清除 */
+    void prepareRun() { m_stop.store(false, std::memory_order_release); }
+    QMap<QString, QVariant> execute(bool resetStop = true);
 
     const QMap<QString, QVariant> &results() const { return m_results; }
     QVariantMap nodeResults(const QString &nodeId) const;
@@ -69,17 +70,31 @@ signals:
     void progressChanged(int finished, int total);
 
 private:
-    void rebuildIndex();
-    /** 只把指向 nodeId 的连线数据搬进该节点，复杂度与入度成正比 */
-    void transferInputs(const QString &nodeId);
+    struct InputBinding
+    {
+        PluginBase *source = nullptr;
+        QString sourcePort;
+        QString targetPort;
+    };
+    struct NodePlan
+    {
+        QString id;
+        PluginBase *plugin = nullptr;
+        QList<InputBinding> inputs;
+        QList<int> outgoing;
+        int inDegree = 0;
+    };
 
-    QMap<QString, PluginBase *> m_plugins;
-    QList<LinkDef> m_links;
-    /** 目标节点 -> 连线下标，避免每执行一个节点都全量扫描连线 */
-    QMultiHash<QString, int> m_incomingLinks;
+    /** setup() 解析节点和端口绑定；执行热路径只访问编译后的索引与指针 */
+    void rebuildIndex(const QMap<QString, PluginBase *> &plugins, const QList<LinkDef> &links);
+    void transferInputs(const NodePlan &node);
+
+    QList<NodePlan> m_nodes;
 
     mutable QStringList m_order;
+    mutable QList<int> m_executionOrder;
     mutable bool m_orderValid = false;
+    mutable bool m_hasCycle = false;
 
     QMap<QString, QVariant> m_results;
     QString m_lastError;

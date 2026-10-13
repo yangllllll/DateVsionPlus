@@ -22,8 +22,6 @@
 
 #include <opencv2/core.hpp>
 
-#include <vector>
-
 #if defined(_WIN32)
 #  define DAHUA_IMV_CALL __stdcall
 #else
@@ -374,6 +372,7 @@ public:
     FnIsGrabbing isGrabbing = nullptr;
 
 private:
+    friend class DahuaCameraTest;
     ImvApi();
     ~ImvApi();
     ImvApi(const ImvApi &) = delete;
@@ -443,6 +442,7 @@ public:
     QString lastError() const { return m_lastError; }
 
 private:
+    friend class DahuaCameraTest;
     void setEnumFeature(const char *name, const char *value);
     void setIntFeature(const char *name, long long value);
     bool fail(const QString &message, QString *error);
@@ -458,7 +458,6 @@ private:
     int m_index = -1;
     unsigned int m_bufferCount = 4;
     unsigned int m_packetSize = 1448;
-    std::vector<unsigned char> m_convertBuffer;
     QString m_lastError;
 };
 

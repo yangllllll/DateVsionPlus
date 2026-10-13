@@ -69,7 +69,8 @@ cv::Mat PatternMatchPlugin::trainTemplate(const cv::Mat &image, const QRect &roi
         return cv::Mat();
 
     const cv::Mat cropped = image(cv::Rect(rx, ry, rw, rh));
-    const cv::Mat gray = ensureGray(cropped).clone();
+    // 彩色转灰度已分配独立内存；单通道 ROI 才需要脱离源图像。
+    const cv::Mat gray = cropped.channels() == 1 ? cropped.clone() : ensureGray(cropped);
 
     m_templateRoi = QRect(rx, ry, rw, rh);
     m_templateImage = gray;

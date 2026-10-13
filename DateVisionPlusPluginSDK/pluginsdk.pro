@@ -15,4 +15,5 @@ SUBDIRS += \
     examples/dahuacamera \
     examples/websocketserver \
     examples/plc    \
-    examples/uvccamera
+    examples/uvccamera \
+

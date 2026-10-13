@@ -120,9 +120,6 @@ void PLCDialog::showResult(const QString &text, bool ok)
 
 bool PLCDialog::ensureConnected()
 {
-    if (m_plugin->client()->isConnected())
-        return true;
-
     QString error;
     if (m_plugin->client()->connectTo(m_plugin->ip(), m_plugin->rack(), m_plugin->slot(), &error)) {
         refresh();

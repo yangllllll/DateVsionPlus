@@ -29,11 +29,14 @@ QImage matToQImage(const cv::Mat &mat)
         return image.copy();
     }
     case 4: {
-        cv::Mat rgba;
+        QImage image(src.cols, src.rows, QImage::Format_RGBA8888);
+        if (image.isNull())
+            return image;
+        // 直接转换到 Qt 自有内存，保持图像独立且省去一次整图拷贝。
+        cv::Mat rgba(src.rows, src.cols, CV_8UC4, image.bits(),
+                     static_cast<size_t>(image.bytesPerLine()));
         cv::cvtColor(src, rgba, cv::COLOR_BGRA2RGBA);
-        QImage image(rgba.data, rgba.cols, rgba.rows, static_cast<int>(rgba.step),
-                     QImage::Format_RGBA8888);
-        return image.copy();
+        return image;
     }
     default:
         break;

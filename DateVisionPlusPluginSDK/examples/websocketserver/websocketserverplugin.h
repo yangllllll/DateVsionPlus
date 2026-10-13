@@ -7,9 +7,13 @@
 
 #include <QHash>
 #include <QList>
+#include <QMutex>
 #include <QObject>
 #include <QString>
 #include <QVariantMap>
+
+#include <atomic>
+#include <vector>
 
 class QDialog;
 class QWidget;
@@ -56,10 +60,10 @@ public:
     QDialog *createDialog(const cv::Mat &inputImage, QWidget *parent) override;
 
     // ---- 供状态对话框调用 ----
-    bool isRunning() const { return m_running; }
-    int clientCount() const { return m_clients.size(); }
-    int listenPort() const { return m_listenPort; }
-    /** 按当前参数启动服务；已在监听且端口未变则直接返回 true */
+    bool isRunning() const { return m_running.load(); }
+    int clientCount() const { return m_clientCount.load(); }
+    int listenPort() const { return m_listenPort.load(); }
+    /** 在插件所属线程按当前参数启动服务；已在监听且端口未变则直接返回 true */
     bool startServer(QString *error = nullptr);
     void stopServer();
 
@@ -71,23 +75,44 @@ private slots:
     void onBroadcast();
 
 private:
+    friend class WebSocketServerPluginTest;
+
     /** 完成 WebSocket 握手；数据未收全时缓存等待 */
     bool handshake(QTcpSocket *socket);
-    /** 发送一个 WebSocket 文本帧（服务端不掩码） */
-    void sendTextFrame(QTcpSocket *socket, const QByteArray &payload) const;
+    /** 封装一次后复用到全部客户端（服务端不掩码） */
+    static QByteArray textFrame(const QByteArray &payload);
     void removeClient(QTcpSocket *socket);
-    /** 当前帧 -> JPEG -> base64 */
-    QByteArray encodeCurrentFrame() const;
-    /** 端口/帧率变化或尚未启动时（重新）启动服务 */
-    void restartIfNeeded();
+    /** 当前帧 -> JPEG -> base64 -> WebSocket 帧，输入/质量未变时复用缓存 */
+    const QByteArray &encodedCurrentFrame();
+    /** execute 可由流程工作线程调用；只投递一个待处理的配置更新 */
+    void requestRestart(int port, int fps);
+    bool startServerWithSettings(int port, int fps, QString *error);
+    void closeServer();
 
     QTcpServer *m_server = nullptr;
     QTimer *m_broadcastTimer = nullptr;
     QList<QTcpSocket *> m_clients;                  ///< 已完成握手的客户端
     QHash<QTcpSocket *, QByteArray> m_handshaking;  ///< 握手中累积的 HTTP 请求
-    cv::Mat m_currentFrame;                         ///< 最近一次输入图像（深拷贝）
-    bool m_running = false;
-    int m_listenPort = 0;
+    // 下面的邮箱由 execute 工作线程和网络所属线程共享。
+    QMutex m_frameMutex;
+    cv::Mat m_currentFrame;                         ///< 最新不可变快照，编码时仅短暂加锁取引用
+    quint64 m_frameRevision = 0;
+    quint64 m_controlGeneration = 0;
+    bool m_restartQueued = false;
+    int m_requestedPort = 9000;
+    int m_requestedFps = 30;
+    QString m_serverError;
+    QString m_encodingError;
+
+    // 编码和所有 socket/timer 操作仅在 QObject 所属线程执行。
+    quint64 m_encodedRevision = 0;
+    int m_encodedQuality = -1;
+    QByteArray m_encodedFrame;
+    std::vector<uchar> m_jpegBuffer;
+    std::atomic_bool m_running{false};
+    std::atomic_int m_clientCount{0};
+    std::atomic_int m_listenPort{0};
+    std::atomic_int m_broadcastInterval{0};
 };
 
 } // namespace OVP

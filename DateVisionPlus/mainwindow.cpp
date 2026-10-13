@@ -40,6 +40,7 @@
 #include <QMessageBox>
 #include <QMetaType>
 #include <QSaveFile>
+#include <QScopedValueRollback>
 #include <QThread>
 #include <QTimer>
 
@@ -53,10 +54,10 @@ const char *kProjectFilter = "DateVisionPlus 项目文件 (*.dvp);;JSON 文件 (
 /**
  * 连续运行模式下「上一轮结束」到「下一轮开始」之间的固定等待（毫秒）。
  * 0 表示不做任何等待：本轮在后台线程跑完、结果回到界面后立刻排队下一轮。
- * 该定时器是单发的（由执行完成回调重新排期），所以 0ms 也不会空转拖垮界面：
- * Qt 只在事件队列没有其他待处理事件时才投递 timeout。
+ * 单发定时器保证最多有一轮待执行；预览和结果表另按显示节拍刷新。
  */
 constexpr int kContinuousIdleMs = 0;
+constexpr int kPresentationIntervalMs = 33;
 
 QVariantMap mapValue(const QVariant &value)
 {
@@ -338,7 +339,6 @@ MainWindow::~MainWindow()
         m_worker->requestStop();
         m_workerThread->quit();
         m_workerThread->wait();
-        delete m_worker;
         m_worker = nullptr;
     }
     delete ui;
@@ -349,6 +349,7 @@ void MainWindow::setupWorker()
     m_workerThread = new QThread(this);
     m_worker = new OVP::ExecutionWorker;
     m_worker->moveToThread(m_workerThread);
+    connect(m_workerThread, &QThread::finished, m_worker, &QObject::deleteLater);
 
     connect(m_worker, &OVP::ExecutionWorker::runStarted, this, &MainWindow::onExecutionStarted);
     connect(m_worker, &OVP::ExecutionWorker::nodeFinished, this, &MainWindow::onNodeStatusChanged);
@@ -380,6 +381,9 @@ void MainWindow::setupConnections()
     connect(m_scene, &FlowScene::nodeAdded, this, &MainWindow::onNodeAdded);
     connect(m_scene, &FlowScene::nodeSelected, this, &MainWindow::onNodeSelected);
     connect(m_scene, &FlowScene::nodeDeselected, this, &MainWindow::onNodeDeselected);
+    connect(m_scene, &FlowScene::nodeAdded, this, [this] { m_graphDirty = true; });
+    connect(m_scene, &FlowScene::nodeRemoved, this, [this] { m_graphDirty = true; });
+    connect(m_scene, &FlowScene::connectionChanged, this, [this] { m_graphDirty = true; });
 
     connect(ui->communicationPanel, &CommunicationPanel::executeRequested, this,
             &MainWindow::onCommTrigger);
@@ -389,6 +393,9 @@ void MainWindow::setupConnections()
 
 void MainWindow::onNew()
 {
+    if (!m_editableUi || m_editing)
+        return;
+    QScopedValueRollback<bool> editing(m_editing, true);
     const int reply = QMessageBox::question(this, QStringLiteral("新建"),
                                             QStringLiteral("确定要新建吗？当前流程图将被清除。"),
                                             QMessageBox::Yes | QMessageBox::No);
@@ -396,6 +403,9 @@ void MainWindow::onNew()
         return;
 
     m_scene->clearAll();
+    m_latestResults.clear();
+    m_latestOrder.clear();
+    m_presentationPending = false;
     ui->previewPanel->clearImage();
     ui->outputPanel->clearLog();
     m_currentFile.clear();
@@ -409,6 +419,9 @@ void MainWindow::onNew()
 
 void MainWindow::onOpen()
 {
+    if (!m_editableUi || m_editing)
+        return;
+    QScopedValueRollback<bool> editing(m_editing, true);
     const QString filePath = QFileDialog::getOpenFileName(
         this, QStringLiteral("打开项目"), QString(), QString::fromUtf8(kProjectFilter));
     if (filePath.isEmpty())
@@ -431,6 +444,9 @@ void MainWindow::onOpen()
 
     const QJsonObject root = document.object();
     m_scene->fromJson(root);
+    m_latestResults.clear();
+    m_latestOrder.clear();
+    m_presentationPending = false;
     ui->previewPanel->clearImage();
     ui->outputPanel->clearLog();
     ui->propertiesPanel->setNode(nullptr);
@@ -450,6 +466,8 @@ void MainWindow::onOpen()
 
 void MainWindow::onSave()
 {
+    if (!m_editableUi || m_editing)
+        return;
     if (m_currentFile.isEmpty()) {
         onSaveAs();
         return;
@@ -459,6 +477,9 @@ void MainWindow::onSave()
 
 void MainWindow::onSaveAs()
 {
+    if (!m_editableUi || m_editing)
+        return;
+    QScopedValueRollback<bool> editing(m_editing, true);
     const QString filePath = QFileDialog::getSaveFileName(
         this, QStringLiteral("保存项目"), QStringLiteral("untitled.dvp"),
         QString::fromUtf8(kProjectFilter));
@@ -504,11 +525,14 @@ void MainWindow::onToggleContinuous(bool checked)
     m_continuousMode = checked;
 
     if (checked) {
+        m_presentationClock.invalidate();
         m_continuousTimer->start();
         ui->outputPanel->logInfo(QStringLiteral("已开启连续运行模式（上一轮结束后立即执行下一轮）"));
         ui->statusbar->showMessage(QStringLiteral("连续运行中..."));
     } else {
         m_continuousTimer->stop();
+        if (!m_executing && m_presentationPending)
+            presentExecutionResults();
         ui->outputPanel->logInfo(QStringLiteral("已关闭连续运行模式"));
         ui->statusbar->showMessage(QStringLiteral("已切换为单次触发"));
     }
@@ -523,6 +547,7 @@ void MainWindow::onStop()
     // setChecked(false) 会触发 toggled 信号，从而调用 onToggleContinuous(false)
     if (m_continuousMode)
         ui->actContinuous->setChecked(false);
+    setRunResult(QStringLiteral("已停止"), "idle");
     ui->outputPanel->logWarning(QStringLiteral("执行已停止"));
     ui->statusbar->showMessage(QStringLiteral("已停止"));
     updateBusyUi();
@@ -530,6 +555,8 @@ void MainWindow::onStop()
 
 void MainWindow::onDelete()
 {
+    if (!m_editableUi || m_editing)
+        return;
     m_scene->removeSelected();
     ui->propertiesPanel->setNode(nullptr);
 }
@@ -564,6 +591,8 @@ void MainWindow::onAbout()
 
 void MainWindow::onRefreshPlugins()
 {
+    if (!m_editableUi || m_editing)
+        return;
     reloadPlugins();
 }
 
@@ -610,6 +639,8 @@ void MainWindow::onCommTrigger()
 
 void MainWindow::addNodeToCenter(const QString &pluginId)
 {
+    if (!m_editableUi || m_editing)
+        return;
     const QPointF center = ui->flowchartView->mapToScene(
         ui->flowchartView->viewport()->rect().center());
     const int offset = m_scene->nodes().size() * 30;
@@ -635,8 +666,9 @@ void MainWindow::onNodeDeselected()
 
 void MainWindow::onNodeDoubleClicked(NodeItem *node)
 {
-    if (!node || !node->plugin())
+    if (!m_editableUi || m_editing || !node || !node->plugin())
         return;
+    QScopedValueRollback<bool> editing(m_editing, true);
 
     // 对话框由插件自己创建（内置工具与用户插件 DLL 走同一套机制）
     const cv::Mat image = inputImageForNode(node);
@@ -658,6 +690,8 @@ void MainWindow::executeUpstream(NodeItem *node, QSet<QString> &executed)
     if (!node || !node->plugin() || executed.contains(node->nodeId()))
         return;
 
+    // 编辑预览也可能遇到环；先标记，避免递归无限增长。
+    executed.insert(node->nodeId());
     node->plugin()->reset();
 
     for (ConnectionItem *conn : m_scene->connections()) {
@@ -677,7 +711,6 @@ void MainWindow::executeUpstream(NodeItem *node, QSet<QString> &executed)
     }
 
     node->plugin()->execute();
-    executed.insert(node->nodeId());
 }
 
 cv::Mat MainWindow::inputImageForNode(NodeItem *node)
@@ -745,9 +778,14 @@ void MainWindow::updateBusyUi()
     ui->actRun->setEnabled(editable);
     ui->actNew->setEnabled(editable);
     ui->actOpen->setEnabled(editable);
+    ui->actSave->setEnabled(editable);
+    ui->actSaveAs->setEnabled(editable);
     ui->actDelete->setEnabled(editable);
     ui->actRefreshPlugins->setEnabled(editable);
     ui->propertiesPanel->setEnabled(editable);
+    ui->toolboxPanel->setEnabled(editable);
+    ui->flowchartView->setInteractive(editable);
+    ui->flowchartView->setAcceptDrops(editable);
 }
 
 void MainWindow::doExecute()
@@ -757,7 +795,7 @@ void MainWindow::doExecute()
 
     // 上一轮尚未结束：直接跳过本次触发，避免事件与任务堆积。
     // 必须放在采集图数据之前 —— 0ms 排期下这里的调用频率很高。
-    if (m_executing) {
+    if (m_executing || m_editing) {
         if (m_commTriggered) {
             ui->communicationPanel->setResponseData(QStringLiteral("ERROR:BUSY"));
             m_commTriggered = false;
@@ -765,11 +803,7 @@ void MainWindow::doExecute()
         return;
     }
 
-    QMap<QString, PluginBase *> plugins;
-    QList<LinkDef> links;
-    collectGraph(plugins, links);
-
-    if (plugins.isEmpty()) {
+    if (m_scene->nodes().isEmpty()) {
         setRunResult(QStringLiteral("无节点"), "idle");
         ui->outputPanel->logWarning(QStringLiteral("流程图为空，无法执行"));
         if (m_commTriggered) {
@@ -779,12 +813,21 @@ void MainWindow::doExecute()
         return;
     }
 
+    if (m_graphDirty) {
+        QMap<QString, PluginBase *> plugins;
+        QList<LinkDef> links;
+        collectGraph(plugins, links);
+        m_worker->setGraph(plugins, links);
+        m_graphDirty = false;
+    }
+    if (!m_worker->prepareRun(!m_continuousMode))
+        return;
+
     m_stopRequested = false;
     m_executionClock.start();
     m_executing = true;
     updateBusyUi();
 
-    m_worker->setGraph(plugins, links);
     QMetaObject::invokeMethod(m_worker, &OVP::ExecutionWorker::run, Qt::QueuedConnection);
 }
 
@@ -792,11 +835,6 @@ void MainWindow::onExecutionStarted(int total)
 {
     if (!m_continuousMode)
         setRunResult(QStringLiteral("执行中"), "running");
-    // 统一清除指示灯，避免每个节点单独触发一次重绘（已废弃）
-    const QMap<QString, NodeItem *> nodes = m_scene->nodes();
-  //  for (auto it = nodes.constBegin(); it != nodes.constEnd(); ++it)
-  //      it.value()->setStatus(-1);
-
     ui->statusbar->showMessage(QStringLiteral("执行中... 共 %1 个节点").arg(total));
 }
 
@@ -814,13 +852,69 @@ void MainWindow::onExecutionProgress(int finished, int total)
 void MainWindow::onExecutionFinished(const QMap<QString, QVariant> &results,
                                      const QStringList &order)
 {
-    if (m_executionClock.isValid())
-        m_cycleTime->setText(QString::number(m_executionClock.elapsed()));
+    const QString error = results.value(QStringLiteral("_error")).toString();
+    const bool errorChanged = error != m_latestResults.value(QStringLiteral("_error")).toString();
+    const bool present = !m_continuousMode || m_stopRequested || errorChanged
+                         || !m_presentationClock.isValid()
+                         || m_presentationClock.elapsed() >= kPresentationIntervalMs;
+    m_latestElapsedMs = m_executionClock.isValid() ? m_executionClock.elapsed() : 0;
+    m_latestResults = results;
+    m_latestOrder = order;
+    m_presentationPending = true;
+    m_executing = false;
+    updateBusyUi();
+
+    // 通信响应不能跟随显示节拍丢帧，也无需为本地运行逐轮计算格式表达式。
+    if (m_commTriggered) {
+        const QString delimiter = ui->communicationPanel->delimiter();
+        QStringList statusParts;
+        statusParts.reserve(order.size());
+        for (const QString &nodeId : order) {
+            const QVariant value = results.value(nodeId);
+            const bool ok = value.metaType().id() == QMetaType::QVariantMap;
+            statusParts.append(ok ? QStringLiteral("OK") : QStringLiteral("NG"));
+        }
+        const QString statusString = statusParts.isEmpty() ? QStringLiteral("NO_RESULT")
+                                                          : statusParts.join(delimiter);
+        const QString outputString = buildCommResponse(results);
+        const QString response = outputString.isEmpty()
+                                     ? statusString
+                                     : QStringLiteral("%1%2%3").arg(statusString, delimiter, outputString);
+        ui->communicationPanel->setResponseData(response);
+        ui->outputPanel->logInfo(QStringLiteral("通信响应: %1%2")
+                                     .arg(response.left(200),
+                                          response.length() > 200 ? QStringLiteral("...") : QString()));
+        m_commTriggered = false;
+    }
+
+    if (!error.isEmpty() && present)
+        ui->outputPanel->logError(error);
+
+    // 在后台空闲时消费当前结果，避免延迟渲染时读取插件下一轮复用的图像缓冲区。
+    if (present) {
+        presentExecutionResults();
+    }
+
+    if (m_continuousMode)
+        m_continuousTimer->start();
+}
+
+void MainWindow::presentExecutionResults()
+{
+    const auto &results = m_latestResults;
+    const auto &order = m_latestOrder;
+    m_cycleTime->setText(QString::number(m_latestElapsedMs));
     int succeeded = 0;
+    QStringList statusParts;
+    statusParts.reserve(order.size());
     for (const QString &nodeId : order) {
         const QVariant value = results.value(nodeId);
-        if (value.isValid() && value.metaType().id() == QMetaType::QVariantMap)
+        const bool ok = value.metaType().id() == QMetaType::QVariantMap;
+        if (ok)
             ++succeeded;
+        statusParts.append(ok ? QStringLiteral("OK") : QStringLiteral("NG"));
+        if (NodeItem *node = m_scene->node(nodeId))
+            node->setStatus(value.isValid() ? (ok ? 1 : 0) : -1);
     }
     if (m_stopRequested) {
         setRunResult(QStringLiteral("已停止"), "idle");
@@ -830,39 +924,11 @@ void MainWindow::onExecutionFinished(const QMap<QString, QVariant> &results,
         setRunResult(QStringLiteral("执行成功"), "success");
     }
     m_runResult->setToolTip(QStringLiteral("成功执行节点：%1 / %2").arg(succeeded).arg(order.size()));
-    m_executing = false;
-    updateBusyUi();
-
     const QString delimiter = ui->communicationPanel->delimiter();
-
-    QStringList statusParts;
-    statusParts.reserve(order.size());
-    for (const QString &nodeId : order) {
-        const QVariant value = results.value(nodeId);
-        const bool ok = value.isValid() && value.metaType().id() == QMetaType::QVariantMap;
-        statusParts.append(ok ? QStringLiteral("OK") : QStringLiteral("NG"));
-    }
     const QString statusString = statusParts.isEmpty() ? QStringLiteral("NO_RESULT")
                                                        : statusParts.join(delimiter);
-
-    // 输出内容
-    const QString outputString = buildCommResponse(results);
-    const QString response = outputString.isEmpty()
-                                 ? statusString
-                                 : QStringLiteral("%1%2%3").arg(statusString, delimiter, outputString);
-
-    if (m_commTriggered) {
-        ui->communicationPanel->setResponseData(response);
-        ui->outputPanel->logInfo(QStringLiteral("通信响应: %1%2")
-                                     .arg(response.left(200),
-                                          response.length() > 200 ? QStringLiteral("...") : QString()));
-        m_commTriggered = false;
-    } else if (!results.contains(QStringLiteral("_error"))) {
+    if (!m_stopRequested && !results.contains(QStringLiteral("_error")))
         ui->outputPanel->logSuccess(statusString);
-    }
-
-    if (results.contains(QStringLiteral("_error")))
-        ui->outputPanel->logError(results.value(QStringLiteral("_error")).toString());
 
     // 预览最后一个有图像输出的节点
     for (int i = order.size() - 1; i >= 0; --i) {
@@ -883,9 +949,8 @@ void MainWindow::onExecutionFinished(const QMap<QString, QVariant> &results,
     ui->outputPanel->updateResults(results);
     ui->statusbar->showMessage(QStringLiteral("执行完成：%1").arg(statusString));
 
-    // 连续运行：本轮收尾后立刻排队下一轮，不再固定等待 100ms
-    if (m_continuousMode)
-        m_continuousTimer->start();
+    m_presentationPending = false;
+    m_presentationClock.start();
 }
 
 QString MainWindow::buildCommResponse(const QMap<QString, QVariant> &results)
