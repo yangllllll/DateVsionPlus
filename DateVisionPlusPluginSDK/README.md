@@ -28,7 +28,9 @@ OpenVisionPlusPluginSDK/
 ├── examples/websocketserver/  # WebSocket 图像流推送：图像转 base64 广播给客户端
 ├── examples/plc/              # PLC 传值：snap7 动态加载，检测结果写入 M/DB 区
 ├── examples/uvccamera/        # UVC 摄像头插件：后台线程连续取图，执行时直接输出最新帧
-└── examples/poseestimation/   # PnP 位姿估计：2D/3D 对应点、RANSAC、重投影预览
+├── examples/poseestimation/   # PnP 位姿估计：2D/3D 对应点、RANSAC、重投影预览
+├── examples/yolodetect/       # YOLO 目标识别：OpenCV DNN / ONNX Runtime 推理 ONNX
+└── examples/materialzone/     # 物料识别：按检测区判断 YOLO 目标中心，输出命中编号
 ```
 
 ## 快速开始（3 步）
@@ -98,10 +100,12 @@ public:
 | 目录 | 工具 ID | 说明 |
 |---|---|---|
 | `examples/userpluginsample/` | 多个 | 完整示例：4 个工具 + 专用对话框，适合当起步模板 |
-| `examples/dahuacamera/` | `mv_camera` | 大华工业相机：`QLibrary` 动态加载 `MVSDKmd.dll`，未装 SDK 也不会导致 DLL 加载失败 |
+| `examples/dahuacamera/` | `mv_camera` | 大华工业相机：`QLibrary` 动态加载 `MVSDKmd.dll`，后台线程常驻拉流；未装 SDK 也不会导致 DLL 加载失败 |
 | `examples/websocketserver/` | — | 把图像转 base64 广播给 WebSocket 客户端 |
 | `examples/plc/` | — | snap7 动态加载，检测结果写入 PLC 的 M / DB 区 |
 | `examples/uvccamera/` | `uvc_camera` | 标准 UVC 摄像头：后台线程连续取图，执行时只输出最新帧 |
+| `examples/yolodetect/` | `user_yolo_detect` | YOLO 目标识别：OpenCV DNN / ONNX Runtime 推理 ONNX，支持 YOLOv8/v11、v5、已 NMS 导出 |
+| `examples/materialzone/` | `material_zone` | 物料识别：按检测区判断 YOLO 目标中心，输出最小命中编号；弹窗右侧拖拽绘制 ROI |
 | `examples/poseestimation/` | `pose_estimation` | 已知相机内参及 2D/3D 对应点求解位姿，支持 RANSAC、LM 优化与重投影预览 |
 
 ### PnP 位姿估计插件（`examples/poseestimation/`）
@@ -112,16 +116,21 @@ public:
 
 详细输入格式、坐标方向、使用示例和测试命令见 [PnP 插件说明](examples/poseestimation/README.md)。
 
-### UVC 摄像头插件（`examples/uvccamera/`）
+### 相机插件（`examples/dahuacamera/`、`examples/uvccamera/`）
 
-依赖 OpenCV 的 `videoio` 模块即可，不需要任何厂商 SDK。
+两个相机插件使用**完全相同**的采集模型（`DahuaGrabber` / `UvcGrabber`，都继承 `QThread`）：
 
-- **取图模型**：`UvcGrabber`（继承 `QThread`）在 `run()` 里打开 `cv::VideoCapture` 后
-  循环 `cap.read()`，每帧写入内部变量并累加帧序号；UI 关闭对话框**不会**关闭摄像头，
-  只有插件析构时才停止线程。
-- **执行时复用采集线程**：相机已启动时，`execute()` 读取后台最新帧；首次执行或断线重连仍需打开相机。
-  采集线程交换双缓冲，读取端在锁外复制像素；旧缓冲区没有读者时才会复用，避免整帧复制阻塞采集。
-  输出保留独立的图像内存，下游修改不会影响采集缓存：
+- **长连接拉流**：在弹窗点击「连接 / 打开摄像头」后一次性建立连接并开始取流
+  （`IMV_Open` + `IMV_StartGrabbing` / `VideoCapture` 打开一次），后台线程循环取帧，
+  每帧写入内部变量并累加帧序号。**拉流与停止拉流只由弹窗控制**，关闭弹窗不会断开。
+- **执行只读变量**：`execute()` 不做任何开关流动作，直接取后台最新帧；
+  从未主动断开过时，首次执行会按参数自动建立长连接。
+- **弹窗行为**：
+  1. 打开弹窗时若相机**已连接并在拉流**：不再探测相机，列表直接显示当前相机，
+     并显示其实时图像（预览只读后台最新帧，不再直接调用相机 SDK）；
+  2. 若**未连接**：才枚举 / 探测相机，由用户选择后连接。
+- **执行时复用采集线程**：采集线程交换双缓冲，读取端在锁外复制像素；旧缓冲区没有读者时才会复用，
+  避免整帧复制阻塞采集。输出保留独立的图像内存，下游修改不会影响采集缓存：
 
   ```cpp
   // 等待一帧比上次更新的图（默认，杜绝过时/重复帧）
@@ -133,25 +142,110 @@ public:
   `seq` 与返回图像在同一次加锁中读取，后续等待应使用该序号，避免再次调用
   `frameSeq()` 时采集线程已更新到另一帧。
 
-- **参数**：`camera_index`、`width / height / fps`（0 = 摄像头默认值）、
-  `backend`（自动 / MSMF / DirectShow / V4L2 / AVFoundation / 任意，后端用数值常量以兼容 OpenCV 4/5）、
-  `wait_new_frame`、`timeout`。
-- 双击节点打开对话框：刷新摄像头列表（连续 2 个序号打不开即停止扫描）、打开/关闭、
-  设置分辨率与帧率、实时预览并显示实测帧率与帧号。
+- **参数（通用）**：`camera_index`、`wait_new_frame`、`timeout`。
+  - `wait_new_frame = true`（默认）：每次执行等一帧比上次更新的图，绝不重复输出同一帧；
+    流程节拍快于相机帧率时会自动被相机帧率限速。
+  - `wait_new_frame = false`：直接输出当前最新帧，延迟最低。
+- **参数（UVC 专属）**：`width / height / fps`（0 = 摄像头默认值）、
+  `backend`（自动 / MSMF / DirectShow / V4L2 / AVFoundation / 任意，后端用数值常量以兼容 OpenCV 4/5）。
+- **参数（大华专属）**：`sdk_path`（`MVSDKmd.dll` 路径，留空自动探测）、
+  `fps`（取流帧率，0 = 不限制；通过 `AcquisitionFrameRate` 下发，
+  自动兼容 `AcquisitionFrameRateEnable` / `AcquisitionFrameRateControlEnable`）。
+  帧率在打开相机时设置，修改后需在对话框中重新连接；相机不支持时只提示警告，不影响取流。
+- 双击节点打开对话框可刷新列表、连接/断开、实时预览，并显示实测帧率与帧号；
+  UVC 对话框还可设置分辨率与帧率。预览定时器会跳过帧号未变化的帧，避免重复转换。
 
-> 相机类插件推荐统一采用这种「句柄常驻 + 后台线程连续取图 + 帧序号」的结构：
-> 避免每次执行都 start → grab → stop 带来的延迟，也不会取到过时图像。
+### YOLO 目标识别插件（`examples/yolodetect/`）
+
+Python 版 `yolo_detect.py` 的 C++ 实现，工具 ID、端口和参数保持一致（`user_yolo_detect`，
+分类「检测定位」），模型推理改为 **OpenCV DNN 或 ONNX Runtime**，不再依赖 ultralytics / torch。
+
+- **推理后端**（参数 `backend`）：
+  - `自动`（默认）：能加载 `onnxruntime.dll` 就用 ONNX Runtime，否则用 OpenCV DNN；
+  - `OpenCV DNN`：零额外依赖，CPU 推理；CUDA 需要 OpenCV 本身带 CUDA 编译；
+  - `ONNX Runtime`：运行期动态加载 `onnxruntime.dll`，GPU 版直接支持 CUDA，无需重编 OpenCV。
+
+- **模型**：仅支持 `.onnx`（相对路径按 当前目录 → 程序目录 解析）。`.pt` 需先导出：
+
+  ```bash
+  yolo export model=yolo11n.pt format=onnx
+  ```
+
+- **输出格式**：默认「自动」，按输出张量形状判断
+  - YOLOv8 / YOLO11：`[1, 4+nc, N]`
+  - YOLOv5：`[1, N, 5+nc]`
+  - 已做 NMS 的端到端导出：`[1, N, 6]`（x1 y1 x2 y2 score class）
+
+  若模型输出特殊（如自定义导出），可在参数或对话框中手动指定格式。
+- **预处理 / 后处理**：letterbox（保持比例 + 灰边 114）→ `blobFromImage(1/255, RGB)` →
+  按类别分别 NMS → 映射回原图坐标。类别名优先从参数「类别名称文件」读取，
+  留空时在模型同目录查找 `<模型名>.names.txt`、`classes.txt`、`labels.txt`、`names.txt`。
+- **设备**：`自动 / CPU / CUDA:0~3`。
+  - OpenCV DNN 后端：自动模式下 `cv::cuda::getCudaEnabledDeviceCount() > 0` 才用 CUDA；
+    显式选 `CUDA:n` 而 OpenCV 没编译 CUDA 时会明确报错；
+  - ONNX Runtime 后端：`自动` 先尝试 CUDA，Provider 不可用时自动回退 CPU；
+  - `device_used` 会写成 `onnxruntime/cuda:0`、`onnxruntime/cpu`、`opencv-dnn/cpu` 等。
+- **端口**：`output`（标注图像）、`det_count`、`detections`、`top_class`、`top_score`、`device_used`。
+  `detections` 是 `QVariantList<QVariantMap>`，每个元素包含
+  `class_id`、`class_name`、`confidence`、`xyxy`、`center`，以及扁平的
+  `x1/y1/x2/y2`、`center_x/center_y`，方便 C++ 下游直接取用。
+- **对话框**：选择模型 / 类别文件、推理后端、ONNX Runtime 路径、设备与全部参数，
+  点击「测试识别」用上游图像试跑并预览标注结果，状态栏显示目标数、实际设备与耗时。
+- 模型按「绝对路径 + 类别文件」在进程内缓存，多个节点共用同一个 `Net` / `OrtSession`；
+  推理时加锁，可安全用于多线程执行。
+
+#### ONNX Runtime 依赖（可选，用于 GPU 加速）
+
+编译期只需要头文件，不需要导入库（运行期 `QLibrary` 动态加载）：
+
+1. 下载 **onnxruntime-win-x64-gpu**（或 CPU 版 `onnxruntime-win-x64`），解压到例如 `D:/onnxruntime`；
+2. 设置环境变量 `ONNXRUNTIME_DIR=D:/onnxruntime`（也可放到 `examples/yolodetect/onnxruntime/`），
+   重新执行 qmake 并构建 —— 编译输出会打印
+   `[YOLO] ONNX Runtime 头文件: .../include`；
+3. 把 `lib/` 下的 `onnxruntime.dll`、`onnxruntime_providers_shared.dll`、
+   `onnxruntime_providers_cuda.dll` 拷到 `DateVisionPlus.exe` 同目录
+   （或在参数 `ort_path` / 对话框中指定 `onnxruntime.dll` 或其所在目录）；
+4. 确保 CUDA 运行库与 cuDNN 的 DLL 在 `PATH` 中（GPU 版 ONNX Runtime 的要求）。
+
+未找到头文件时插件仍可构建，只是没有 ONNX Runtime 后端（`backend` 会退化为 OpenCV DNN）。
+
+### 物料识别（检测区）插件（`examples/materialzone/`）
+
+配合 YOLO 使用：判断每个检测目标的**中心点**落在哪个检测区，输出命中的检测区编号。
+
+```
+YOLO目标识别 ── detections ──▶ 物料识别(检测区) ── zone_id ──▶ 后续判定/PLC
+              ── output ─────▶（可选，输入图像）
+```
+
+- **输入端口**：`input`（图像，用于坐标换算与绘制）、`detections`（YOLO 的检测结果）。
+- **输出端口**：`output`（标注图像）、`zone_id`（**存在物料的检测区中编号最小者**，无则 `-1`）、
+  `present`（是否有物料）、`object_count`（落在检测区内的物体数）、`zone_hits`（各检测区命中数）。
+- **检测区坐标**以归一化 `0~1` 保存，图像分辨率变化无需重画；随项目保存在 `extraData` 中。
+- **判定**：中心点落在检测区矩形内即算命中（同一物体落在多个重叠区域时各自计数）；
+  有多个区域命中时输出**编号最小**的那个。
+- **参数**：`min_score`（最小置信度）、`class_filter`（类别 id 或名称，逗号分隔）、
+  `line_thickness`、`draw`（是否绘制标注）、`empty_as_ng`（无物料时判 NG）。
+- **对话框**：左侧是检测区列表（编号 / X / Y / 宽 / 高）与参数；
+  **右侧图像画布上按住左键拖拽即可新建检测区**，单击选中、`Delete` 删除，
+  也可用「删除选中 / 清空」按钮。新区域编号自动取当前最大编号 + 1。
 
 ## 高频路径优化与验证
 
 - **UVC**：采集帧通过双缓冲交换发布，仅复用没有读者的缓冲区；读者只在锁内取得帧引用和序号，在锁外生成独立输出。
-- **大华相机**：SDK 像素转换直接写入最终图像，减少一次整帧复制；已有连续取流不再被
-  `grab()` 关闭，临时取流和 SDK 帧通过作用域守卫释放。Bayer GB8 原始灰度输出按行处理 padding。
+- **大华相机**：`DahuaGrabber` 长连接常驻拉流，帧同样通过双缓冲交换发布；后台循环关闭
+  `getFrame` 的失败诊断（`withDiagnostics = false`），避免每次超时都额外查询统计和触发模式。
+  SDK 像素转换直接写入最终图像，减少一次整帧复制；临时取流和 SDK 帧通过作用域守卫释放。
+  Bayer GB8 原始灰度输出按行处理 padding。`grab()` 仅保留给独立测试代码。
 - **WebSocket**：输入版本和 JPEG 质量未变时复用完整编码帧，多客户端共用一次封装；
   慢客户端有待发送数据时跳过本轮，全部客户端繁忙时跳过编码。仍按设定帧率重发最后一帧。
   工作线程通过加锁的最新帧缓存和合并的配置请求与网络线程交互，socket 和 timer 由对象所属线程操作。
 - **PLC**：单字节读写使用栈内存；连接按 IP、rack、slot 完整匹配后复用；
   多字节读写按 Snap7 元素大小分配缓冲区并检查长度。相同结果仍每轮写入，默认「执行后断开」保持不变。
+- **YOLO**：模型按「绝对路径 + 类别文件」缓存，多个节点共用同一个 Net / OrtSession；
+  ONNX 从内存加载，规避 Windows 中文/空格路径；letterbox 一次性生成 blob，后处理按类别分别 NMS。
+  ONNX Runtime 是可选的运行期依赖（`QLibrary` 动态加载，无需导入库），
+  CUDA Provider 不可用时自动回退 CPU 并在 `device_used` 中标注。
 
 离线回归工程使用合成帧、模拟 SDK 或本机回环，不需要连接实际相机或 PLC：
 

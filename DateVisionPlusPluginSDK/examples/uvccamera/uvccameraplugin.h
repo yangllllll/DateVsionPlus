@@ -54,8 +54,10 @@ public:
     bool isCameraOpen() const;
     /** 按当前参数打开摄像头并启动后台取图线程；index < 0 表示沿用参数中的序号 */
     bool openCamera(int index = -1);
-    /** 停止后台取图并关闭摄像头 */
+    /** 停止后台取图并关闭摄像头（内部/异常路径使用，不影响自动重连策略） */
     void closeCamera();
+    /** 用户在弹窗中主动断开：停止取流，并且执行时不再自动重连 */
+    void disconnectCamera();
     /** 直接取后台线程里的最新帧（不等待） */
     cv::Mat previewFrame(quint64 *seq = nullptr);
     QString cameraError() const { return m_grabber.error(); }
@@ -66,6 +68,8 @@ private:
 
     UVC::UvcGrabber m_grabber;
     quint64 m_lastSeq = 0;
+    /** 用户在弹窗中主动断开后，执行时不再自动重连 */
+    bool m_autoStart = true;
 };
 
 } // namespace OVP

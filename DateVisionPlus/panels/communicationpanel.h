@@ -21,6 +21,8 @@ public:
 
     QString outputFormat() const;
     QString delimiter() const;
+    /** 结果发送延迟（毫秒），用于兼容响应太快会丢失的客户端 */
+    int sendDelayMs() const;
 
     QJsonObject config() const;
     void setConfig(const QJsonObject &config);

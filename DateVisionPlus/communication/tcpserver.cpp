@@ -5,6 +5,8 @@
 #include <QTcpSocket>
 #include <QTimer>
 
+#include <utility>
+
 TcpServer::TcpServer(QObject *parent)
     : QObject(parent)
 {
@@ -15,6 +17,11 @@ TcpServer::TcpServer(QObject *parent)
     m_timeoutTimer->setSingleShot(true);
     m_timeoutTimer->setInterval(10000);
     connect(m_timeoutTimer, &QTimer::timeout, this, &TcpServer::onResponseTimeout);
+
+    // 结果发送延迟（见 setSendDelay）
+    m_sendTimer = new QTimer(this);
+    m_sendTimer->setSingleShot(true);
+    connect(m_sendTimer, &QTimer::timeout, this, &TcpServer::sendPendingResponse);
 }
 
 TcpServer::~TcpServer()
@@ -48,8 +55,10 @@ bool TcpServer::startServer()
 void TcpServer::stopServer()
 {
     m_timeoutTimer->stop();
+    m_sendTimer->stop();
     m_waitingResponse = false;
     m_pendingSocket = nullptr;
+    m_pendingData.clear();
 
     for (QTcpSocket *socket : m_clients) {
         socket->disconnectFromHost();
@@ -78,9 +87,23 @@ void TcpServer::setResponse(const QString &data)
     m_waitingResponse = false;
     m_timeoutTimer->stop();
 
+    m_pendingData = data;
+    if (m_sendDelayMs > 0) {
+        // 延迟发送：给客户端留出切换到接收状态的时间
+        m_sendTimer->start(m_sendDelayMs);
+        return;
+    }
+    sendPendingResponse();
+}
+
+void TcpServer::sendPendingResponse()
+{
+    m_sendTimer->stop();
+
     QTcpSocket *socket = m_pendingSocket;
     m_pendingSocket = nullptr;
-    if (!socket)
+    const QString data = std::exchange(m_pendingData, QString());
+    if (!socket || socket->state() != QAbstractSocket::ConnectedState)
         return;
 
     socket->write((data + QStringLiteral("\n")).toUtf8());

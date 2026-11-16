@@ -34,18 +34,24 @@ UvcCameraDialog::UvcCameraDialog(OVP::UvcCameraPlugin *plugin, QWidget *parent)
     m_previewTimer->setInterval(kPreviewIntervalMs);
     connect(m_previewTimer, &QTimer::timeout, this, &UvcCameraDialog::onPreviewTick);
 
-    refreshCameraList();
-
-    const int savedIndex = m_plugin ? m_plugin->paramInt(QStringLiteral("camera_index"), 0) : 0;
-    for (int i = 0; i < m_cameraCombo->count(); ++i) {
-        if (m_cameraCombo->itemData(i).toInt() == savedIndex) {
-            m_cameraCombo->setCurrentIndex(i);
-            break;
+    // 已连接并正在拉流：不再探测相机，直接显示当前相机的实时图像
+    const bool streaming = m_plugin && m_plugin->isCameraOpen();
+    if (streaming) {
+        populateCurrentCamera();
+        m_statusLabel->setText(QStringLiteral("已连接，后台线程正在连续拉流"));
+    } else {
+        refreshCameraList();
+        const int savedIndex = m_plugin ? m_plugin->paramInt(QStringLiteral("camera_index"), 0) : 0;
+        for (int i = 0; i < m_cameraCombo->count(); ++i) {
+            if (m_cameraCombo->itemData(i).toInt() == savedIndex) {
+                m_cameraCombo->setCurrentIndex(i);
+                break;
+            }
         }
     }
 
-    setConnectedState(m_plugin && m_plugin->isCameraOpen());
-    if (m_plugin && m_plugin->isCameraOpen())
+    setConnectedState(streaming);
+    if (streaming)
         m_previewTimer->start();
 }
 
@@ -165,6 +171,17 @@ void UvcCameraDialog::refreshCameraList()
         m_statusLabel->setText(QStringLiteral("发现 %1 个摄像头").arg(cameras.size()));
 }
 
+void UvcCameraDialog::populateCurrentCamera()
+{
+    m_cameraCombo->clear();
+    if (!m_plugin)
+        return;
+
+    const int index = m_plugin->paramInt(QStringLiteral("camera_index"), 0);
+    m_cameraCombo->addItem(QStringLiteral("[%1] 当前相机（已连接）").arg(index), index);
+    m_cameraCombo->setCurrentIndex(0);
+}
+
 void UvcCameraDialog::setConnectedState(bool connected)
 {
     m_connectButton->setText(connected ? QStringLiteral("关闭摄像头") : QStringLiteral("打开摄像头"));
@@ -180,6 +197,7 @@ void UvcCameraDialog::stopPreview()
     if (m_previewTimer)
         m_previewTimer->stop();
     m_missedFrames = 0;
+    m_lastShownSeq = 0;
 }
 
 void UvcCameraDialog::applyUiToParams()
@@ -207,10 +225,11 @@ void UvcCameraDialog::onConnectClicked()
 
     if (m_plugin->isCameraOpen()) {
         stopPreview();
-        m_plugin->closeCamera();
+        m_plugin->disconnectCamera();
         m_previewLabel->setPixmap(QPixmap());
         m_previewLabel->setText(QStringLiteral("未打开摄像头"));
         setConnectedState(false);
+        refreshCameraList();   // 已断开，重新探测相机
         m_statusLabel->setText(QStringLiteral("已关闭"));
         return;
     }
@@ -283,6 +302,11 @@ void UvcCameraDialog::onPreviewTick()
     }
 
     m_missedFrames = 0;
+
+    // 同一帧不重复转 QPixmap
+    if (seq == m_lastShownSeq)
+        return;
+    m_lastShownSeq = seq;
 
     const QPixmap pixmap = OVP::matToQPixmap(frame);
     if (pixmap.isNull())

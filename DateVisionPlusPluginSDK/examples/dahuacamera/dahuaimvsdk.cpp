@@ -1,7 +1,9 @@
 #include "dahuaimvsdk.h"
 
 #include <QCoreApplication>
+#include <QDeadlineTimer>
 #include <QDir>
+#include <QElapsedTimer>
 #include <QFileInfo>
 #include <QScopeGuard>
 
@@ -207,6 +209,8 @@ bool ImvApi::resolveSymbols(QLibrary *library, QString *error)
     DAHUA_RESOLVE_OPTIONAL(setBufferCount, "IMV_SetBufferCount");
     DAHUA_RESOLVE_OPTIONAL(setEnumFeatureSymbol, "IMV_SetEnumFeatureSymbol");
     DAHUA_RESOLVE_OPTIONAL(setIntFeatureValue, "IMV_SetIntFeatureValue");
+    DAHUA_RESOLVE_OPTIONAL(setFloatFeatureValue, "IMV_SetFloatFeatureValue");
+    DAHUA_RESOLVE_OPTIONAL(setBoolFeatureValue, "IMV_SetBoolFeatureValue");
     DAHUA_RESOLVE_OPTIONAL(getVersion, "IMV_GetVersion");
     DAHUA_RESOLVE_OPTIONAL(getEnumFeatureSymbol, "IMV_GetEnumFeatureSymbol");
     DAHUA_RESOLVE_OPTIONAL(getStatisticsInfo, "IMV_GetStatisticsInfo");
@@ -399,6 +403,55 @@ bool DahuaCamera::open(int index, QString *error)
     setIntFeature("GevSCPSPacketSize", static_cast<long long>(m_packetSize));
     setIntFeature("GevStreamChannelSelector", 0);
 
+    // 取流帧率（失败只记录警告，不影响相机打开；fps <= 0 时关闭帧率控制）
+    m_lastWarning.clear();
+    applyFrameRate();
+
+    return true;
+}
+
+/**
+ * @brief 应用取流帧率
+ *
+ * 帧率控制在不同型号上可能是 AcquisitionFrameRateEnable 或
+ * AcquisitionFrameRateControlEnable，这里两个都试；
+ * 相机不支持时只记录警告，open() 仍返回成功。
+ */
+bool DahuaCamera::applyFrameRate()
+{
+    ImvApi *api = ImvApi::instance();
+    if (!m_handle)
+        return false;
+
+    auto setRateControlEnabled = [&](bool enabled) {
+        if (setBoolFeature("AcquisitionFrameRateEnable", enabled) == IMV_OK)
+            return;
+        setBoolFeature("AcquisitionFrameRateControlEnable", enabled);
+    };
+
+    if (m_frameRate <= 0.0) {
+        // 0 = 不限制：关闭帧率控制，按相机最大能力出图
+        setRateControlEnabled(false);
+        return true;
+    }
+
+    setRateControlEnabled(true);
+
+    if (!api->setFloatFeatureValue) {
+        m_lastWarning = QStringLiteral("当前 MVSDK 不支持浮点属性设置，取流帧率未生效");
+        return false;
+    }
+
+    const int ret = setFloatFeature("AcquisitionFrameRate", m_frameRate);
+    if (ret != IMV_OK) {
+        m_lastWarning = QStringLiteral("设置取流帧率 %1 fps 失败：%2（%3），"
+                                       "相机继续按自身帧率出图")
+                            .arg(m_frameRate, 0, 'f', 1)
+                            .arg(statusText(ret))
+                            .arg(ret);
+        return false;
+    }
+
     return true;
 }
 
@@ -449,7 +502,8 @@ void DahuaCamera::stopGrabbing()
     m_grabbing = false;
 }
 
-bool DahuaCamera::getFrame(cv::Mat &out, unsigned int timeoutMs, QString *error)
+bool DahuaCamera::getFrame(cv::Mat &out, unsigned int timeoutMs, QString *error,
+                           bool withDiagnostics)
 {
     if (!m_open)
         return fail(QStringLiteral("相机未连接"), error);
@@ -475,9 +529,11 @@ bool DahuaCamera::getFrame(cv::Mat &out, unsigned int timeoutMs, QString *error)
     if (ret != IMV_OK) {
         QString detail = QStringLiteral("获取帧失败: %1（%2），超时 %3 ms")
                              .arg(statusText(ret)).arg(ret).arg(timeoutMs);
-        const QString diagnostics = streamDiagnostics();
-        if (!diagnostics.isEmpty())
-            detail += QStringLiteral("；%1").arg(diagnostics);
+        if (withDiagnostics) {
+            const QString diagnostics = streamDiagnostics();
+            if (!diagnostics.isEmpty())
+                detail += QStringLiteral("；%1").arg(diagnostics);
+        }
         return fail(detail, error);
     }
 
@@ -573,6 +629,22 @@ void DahuaCamera::setIntFeature(const char *name, long long value)
         api->setIntFeatureValue(m_handle, name, value);
 }
 
+int DahuaCamera::setFloatFeature(const char *name, double value)
+{
+    ImvApi *api = ImvApi::instance();
+    if (!m_handle || !api->setFloatFeatureValue)
+        return IMV_NOT_SUPPORT;
+    return api->setFloatFeatureValue(m_handle, name, value);
+}
+
+int DahuaCamera::setBoolFeature(const char *name, bool value)
+{
+    ImvApi *api = ImvApi::instance();
+    if (!m_handle || !api->setBoolFeatureValue)
+        return IMV_NOT_SUPPORT;
+    return api->setBoolFeatureValue(m_handle, name, value);
+}
+
 QString DahuaCamera::enumFeatureValue(const char *name) const
 {
     ImvApi *api = ImvApi::instance();
@@ -623,6 +695,296 @@ QString DahuaCamera::streamDiagnostics() const
         items.append(QStringLiteral("TriggerMode=%1").arg(triggerMode));
 
     return items.join(QStringLiteral("，"));
+}
+
+// -------------------------------------------------------------- DahuaGrabber
+
+namespace {
+
+constexpr int kGrabTimeoutMs = 1000;         //!< 后台线程每次取帧的超时
+constexpr int kMaxConsecutiveFailures = 10;  //!< 连续失败次数，超过则认为相机已断开
+constexpr int kOpenWaitMs = 8000;            //!< startGrab 等待相机打开的最长时间
+
+} // namespace
+
+DahuaGrabber::DahuaGrabber(QObject *parent)
+    : QThread(parent)
+{
+}
+
+DahuaGrabber::~DahuaGrabber()
+{
+    stopGrab();
+}
+
+void DahuaGrabber::setOpenOptions(int index, const QString &sdkPath, double frameRate)
+{
+    QMutexLocker locker(&m_mutex);
+    m_index = qMax(0, index);
+    m_sdkPath = sdkPath;
+    m_frameRate = frameRate;
+}
+
+bool DahuaGrabber::startGrab(QString *error)
+{
+    if (isGrabbing())
+        return true;
+    if (isRunning())
+        stopGrab();
+
+    {
+        QMutexLocker locker(&m_mutex);
+        m_error.clear();
+        m_warning.clear();
+        m_started = false;
+        m_seq = 0;
+        m_fps = 0.0;
+        m_latest.reset();
+    }
+
+    m_stop.store(false);
+    start();
+
+    // 等相机真正打开，让调用方立刻拿到明确结果
+    QDeadlineTimer deadline(kOpenWaitMs);
+    QMutexLocker locker(&m_mutex);
+    while (!m_started) {
+        if (!m_cond.wait(&m_mutex, deadline))
+            break;
+    }
+
+    if (!m_error.isEmpty()) {
+        if (error)
+            *error = m_error;
+        return false;
+    }
+    if (!m_started) {
+        if (error)
+            *error = QStringLiteral("打开相机超时");
+        return false;
+    }
+    return true;
+}
+
+void DahuaGrabber::stopGrab()
+{
+    if (!isRunning())
+        return;
+
+    m_stop.store(true);
+    {
+        QMutexLocker locker(&m_mutex);
+        m_cond.wakeAll();
+    }
+    wait(6000);
+}
+
+bool DahuaGrabber::isGrabbing() const
+{
+    return isRunning() && !m_stop.load();
+}
+
+bool DahuaGrabber::lastFrame(cv::Mat &out, quint64 *seq) const
+{
+    std::shared_ptr<const cv::Mat> snapshot;
+    {
+        QMutexLocker locker(&m_mutex);
+        if (!m_latest || m_latest->empty())
+            return false;
+
+        snapshot = m_latest;
+        if (seq)
+            *seq = m_seq;
+    }
+    // 发布后的帧不再修改，引用计数保证解锁后仍有效；输出独立副本供下游修改。
+    out = snapshot->clone();
+    return true;
+}
+
+bool DahuaGrabber::waitFrame(cv::Mat &out, int timeoutMs, quint64 afterSeq,
+                             QString *error, quint64 *seq)
+{
+    QDeadlineTimer deadline(timeoutMs);
+    QMutexLocker locker(&m_mutex);
+
+    while (m_seq <= afterSeq && m_error.isEmpty() && !m_stop.load()) {
+        if (timeoutMs <= 0)
+            break;
+        if (!m_cond.wait(&m_mutex, deadline))
+            break;
+    }
+
+    if (!m_error.isEmpty() && m_seq == 0) {
+        if (error)
+            *error = m_error;
+        return false;
+    }
+    if (m_seq == 0) {
+        if (error)
+            *error = QStringLiteral("相机未输出图像");
+        return false;
+    }
+    if (m_seq <= afterSeq) {
+        if (error)
+            *error = QStringLiteral("等待新帧超时（%1 ms）").arg(timeoutMs);
+        return false;
+    }
+
+    std::shared_ptr<const cv::Mat> snapshot = m_latest;
+    if (seq)
+        *seq = m_seq;
+    locker.unlock();
+    out = snapshot->clone();
+    return true;
+}
+
+void DahuaGrabber::prepareFrame(std::shared_ptr<cv::Mat> &frame)
+{
+    // 帧已移出最新帧槽，当前无新读者；仅在旧读者全部释放后复用缓冲区。
+    QMutexLocker locker(&m_mutex);
+    if (!frame || frame.use_count() != 1)
+        frame = std::make_shared<cv::Mat>();
+}
+
+void DahuaGrabber::publishFrame(std::shared_ptr<cv::Mat> &frame)
+{
+    // 只交换所有权，不在采集锁内复制图像。
+    QMutexLocker locker(&m_mutex);
+    m_latest.swap(frame);
+    ++m_seq;
+    m_width = m_latest->cols;
+    m_height = m_latest->rows;
+    m_cond.wakeAll();
+}
+
+quint64 DahuaGrabber::frameSeq() const
+{
+    QMutexLocker locker(&m_mutex);
+    return m_seq;
+}
+
+double DahuaGrabber::measuredFps() const
+{
+    QMutexLocker locker(&m_mutex);
+    return m_fps;
+}
+
+int DahuaGrabber::frameWidth() const
+{
+    QMutexLocker locker(&m_mutex);
+    return m_width;
+}
+
+int DahuaGrabber::frameHeight() const
+{
+    QMutexLocker locker(&m_mutex);
+    return m_height;
+}
+
+int DahuaGrabber::cameraIndex() const
+{
+    QMutexLocker locker(&m_mutex);
+    return m_index;
+}
+
+QString DahuaGrabber::error() const
+{
+    QMutexLocker locker(&m_mutex);
+    return m_error;
+}
+
+QString DahuaGrabber::warning() const
+{
+    QMutexLocker locker(&m_mutex);
+    return m_warning;
+}
+
+void DahuaGrabber::run()
+{
+    int index = 0;
+    QString sdkPath;
+    double frameRate = 0.0;
+    {
+        QMutexLocker locker(&m_mutex);
+        index = m_index;
+        sdkPath = m_sdkPath;
+        frameRate = m_frameRate;
+    }
+
+    // —— 长连接：Open / StartGrabbing 只做一次，之后只在 stopGrab 时关闭 ——
+    QString error;
+    ImvApi *api = ImvApi::instance();
+    if (!api->isLoaded() && !api->load(sdkPath, &error)) {
+        QMutexLocker locker(&m_mutex);
+        m_error = error;
+        m_started = true;
+        m_cond.wakeAll();
+        return;
+    }
+
+    m_camera.setFrameRate(frameRate);
+
+    if (!m_camera.open(index, &error)) {
+        QMutexLocker locker(&m_mutex);
+        m_error = error;
+        m_started = true;
+        m_cond.wakeAll();
+        return;
+    }
+    if (!m_camera.startGrabbing(&error)) {
+        m_camera.close();
+        QMutexLocker locker(&m_mutex);
+        m_error = error;
+        m_started = true;
+        m_cond.wakeAll();
+        return;
+    }
+
+    {
+        QMutexLocker locker(&m_mutex);
+        m_started = true;
+        m_error.clear();
+        m_warning = m_camera.lastWarning();   // 帧率设置等非致命提示
+        m_cond.wakeAll();
+    }
+
+    std::shared_ptr<cv::Mat> frame;
+    int failures = 0;
+    quint64 counted = 0;
+    QElapsedTimer fpsTimer;
+    fpsTimer.start();
+
+    while (!m_stop.load(std::memory_order_relaxed)) {
+        prepareFrame(frame);
+        if (!m_camera.getFrame(*frame, kGrabTimeoutMs, &error, false)) {
+            if (m_stop.load())
+                break;
+            if (++failures >= kMaxConsecutiveFailures) {
+                QMutexLocker locker(&m_mutex);
+                m_error = error;
+                m_cond.wakeAll();
+                break;
+            }
+            continue;
+        }
+        failures = 0;
+
+        // 交换采集/最新帧缓冲区；prepareFrame 保证下一次 getFrame 不覆盖读者的像素。
+        publishFrame(frame);
+
+        if (++counted >= 30) {
+            const double elapsed = fpsTimer.elapsed() / 1000.0;
+            if (elapsed > 0.0) {
+                QMutexLocker locker(&m_mutex);
+                m_fps = counted / elapsed;
+            }
+            counted = 0;
+            fpsTimer.restart();
+        }
+    }
+
+    m_camera.stopGrabbing();
+    m_camera.close();
 }
 
 } // namespace DahuaMV

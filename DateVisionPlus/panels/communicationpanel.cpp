@@ -75,6 +75,10 @@ CommunicationPanel::CommunicationPanel(QWidget *parent)
         ui->lblClientCount->setText(QStringLiteral("连接: %1").arg(count));
     });
 
+    // 发送延迟实时下发（改完即生效，无需重启服务）
+    connect(ui->spinSendDelay, &QSpinBox::valueChanged,
+            m_server, &TcpServer::setSendDelay);
+
     ui->btnStop->setEnabled(false);
     ui->editCustomDelimiter->setVisible(false);
 }
@@ -82,6 +86,11 @@ CommunicationPanel::CommunicationPanel(QWidget *parent)
 CommunicationPanel::~CommunicationPanel()
 {
     delete ui;
+}
+
+int CommunicationPanel::sendDelayMs() const
+{
+    return ui->spinSendDelay->value();
 }
 
 QString CommunicationPanel::outputFormat() const
@@ -166,6 +175,7 @@ QJsonObject CommunicationPanel::config() const
 {
     QJsonObject object;
     object.insert(QStringLiteral("port"), ui->spinPort->value());
+    object.insert(QStringLiteral("send_delay_ms"), ui->spinSendDelay->value());
     object.insert(QStringLiteral("control_word"), ui->editControlWord->text());
     object.insert(QStringLiteral("output_format"), ui->editOutputFormat->toPlainText());
     object.insert(QStringLiteral("delimiter"), ui->comboDelimiter->currentText());
@@ -177,6 +187,8 @@ void CommunicationPanel::setConfig(const QJsonObject &config)
 {
     if (config.contains(QStringLiteral("port")))
         ui->spinPort->setValue(config.value(QStringLiteral("port")).toInt(8080));
+    if (config.contains(QStringLiteral("send_delay_ms")))
+        ui->spinSendDelay->setValue(config.value(QStringLiteral("send_delay_ms")).toInt(0));
     if (config.contains(QStringLiteral("control_word")))
         ui->editControlWord->setText(config.value(QStringLiteral("control_word")).toString());
     if (config.contains(QStringLiteral("output_format")))

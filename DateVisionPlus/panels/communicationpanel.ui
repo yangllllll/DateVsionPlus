@@ -102,7 +102,41 @@
             </property>
            </widget>
           </item>
-          <item row="2" column="0" colspan="2">
+          <item row="2" column="0">
+           <widget class="QLabel" name="lblSendDelayCaption">
+            <property name="text">
+             <string>发送延迟:</string>
+            </property>
+            <property name="toolTip">
+             <string>检测结果生成后，延迟指定毫秒再发送给客户端。
+客户端（PLC 等）收到触发后需要时间切换到接收状态时可调大此值。</string>
+            </property>
+           </widget>
+          </item>
+          <item row="2" column="1">
+           <widget class="QSpinBox" name="spinSendDelay">
+            <property name="toolTip">
+             <string>检测结果生成后，延迟指定毫秒再发送给客户端。
+客户端（PLC 等）收到触发后需要时间切换到接收状态时可调大此值。</string>
+            </property>
+            <property name="suffix">
+             <string> ms</string>
+            </property>
+            <property name="minimum">
+             <number>0</number>
+            </property>
+            <property name="maximum">
+             <number>10000</number>
+            </property>
+            <property name="singleStep">
+             <number>10</number>
+            </property>
+            <property name="value">
+             <number>0</number>
+            </property>
+           </widget>
+          </item>
+          <item row="3" column="0" colspan="2">
            <widget class="QWidget" name="buttonBar" native="true">
             <layout class="QHBoxLayout" name="buttonBarLayout">
              <property name="leftMargin">

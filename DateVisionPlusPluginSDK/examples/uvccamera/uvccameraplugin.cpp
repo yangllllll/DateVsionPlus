@@ -90,11 +90,17 @@ bool UvcCameraPlugin::execute()
 {
     clearError();
 
-    // 摄像头未打开（例如没打开过对话框）时按需自动打开，之后线程常驻
+    // 摄像头未打开时：从未主动断开过则自动建立长连接；用户主动断开过则不再自动重连
     QString error;
-    if (!m_grabber.isGrabbing() && !ensureStarted(&error)) {
-        setError(QStringLiteral("摄像头打开失败: %1").arg(error));
-        return false;
+    if (!m_grabber.isGrabbing()) {
+        if (!m_autoStart) {
+            setError(QStringLiteral("摄像头未连接，请先在插件窗口中打开摄像头"));
+            return false;
+        }
+        if (!ensureStarted(&error)) {
+            setError(QStringLiteral("摄像头打开失败: %1").arg(error));
+            return false;
+        }
     }
 
     const int timeout = paramInt(QStringLiteral("timeout"), 2000);
@@ -156,11 +162,18 @@ bool UvcCameraPlugin::openCamera(int index)
     }
 
     m_lastSeq = 0;
+    m_autoStart = true;
     return true;
 }
 
 void UvcCameraPlugin::closeCamera()
 {
+    m_grabber.stopGrab();
+}
+
+void UvcCameraPlugin::disconnectCamera()
+{
+    m_autoStart = false;
     m_grabber.stopGrab();
 }
 

@@ -24,6 +24,14 @@ public:
     void stopServer();
     bool isListening() const;
 
+    /**
+     * 结果发送延迟（毫秒）。
+     * 部分客户端（PLC 等）发出触发后需要时间切换到接收状态，
+     * 结果返回太快会被丢弃；此时把延迟调大即可。
+     */
+    void setSendDelay(int ms) { m_sendDelayMs = qMax(0, ms); }
+    int sendDelay() const { return m_sendDelayMs; }
+
 public slots:
     /** 主窗口执行完成后调用，把结果回写给触发的客户端 */
     void setResponse(const QString &data);
@@ -39,6 +47,7 @@ private slots:
     void onSocketReadyRead();
     void onSocketDisconnected();
     void onResponseTimeout();
+    void sendPendingResponse();
 
 private:
     QTcpSocket *senderSocket() const { return m_pendingSocket; }
@@ -47,6 +56,9 @@ private:
     QList<QTcpSocket *> m_clients;
     QTcpSocket *m_pendingSocket = nullptr;
     QTimer *m_timeoutTimer = nullptr;
+    QTimer *m_sendTimer = nullptr;
+    QString m_pendingData;
+    int m_sendDelayMs = 0;
 
     int m_port = 8080;
     QString m_controlWord = QStringLiteral("TRIGGER");

@@ -14,6 +14,8 @@ SUBDIRS += \
     examples/userpluginsample \
     examples/dahuacamera \
     examples/websocketserver \
-    examples/plc    \
+    examples/plc \
     examples/uvccamera \
+    examples/yolodetect \
+    examples/materialzone
 

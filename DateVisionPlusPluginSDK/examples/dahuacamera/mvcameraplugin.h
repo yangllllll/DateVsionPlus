@@ -11,6 +11,7 @@
 #include <QList>
 #include <QObject>
 #include <QString>
+#include <QtGlobal>
 
 class QDialog;
 class QWidget;
@@ -20,8 +21,9 @@ namespace OVP {
 /**
  * @brief 大华相机插件（对应 Python 版 MVCameraPlugin）
  *
- * 通过 MVSDK 连接大华工业相机并采集图像；双击节点可打开预览/设置对话框。
- * 相机句柄常驻，运行期意外断线后 execute() 会自动重连。
+ * 与 UVC 插件采用同一取图模型：在对话框点击「连接」后，
+ * DahuaGrabber 在独立线程里长连接连续拉流，把最新帧写入内部变量；
+ * execute() 只读该变量，不做任何开关流动作。
  */
 class MVCameraPlugin : public PluginBase
 {
@@ -32,11 +34,11 @@ public:
     ~MVCameraPlugin() override;
 
     QString id() const override { return QStringLiteral("mv_camera"); }
-    QString name() const override { return QStringLiteral("大华相机"); }
+    QString name() const override { return QStringLiteral("GigE相机"); }
     QString category() const override { return QStringLiteral("输入输出"); }
     QString description() const override
     {
-        return QStringLiteral("连接大华工业相机，通过 MVSDK 采集图像");
+        return QStringLiteral("连接GigE相机，后台线程连续拉流，执行时输出最新帧");
     }
 
     QList<PortDef> inputPorts() const override { return {}; }
@@ -48,20 +50,28 @@ public:
     QDialog *createDialog(const cv::Mat &inputImage, QWidget *parent) override;
 
     // ---- 供对话框调用 ----
-    DahuaMV::DahuaCamera *camera() { return &m_camera; }
+    DahuaMV::DahuaGrabber *grabber() { return &m_grabber; }
     bool isConnected() const;
-    /** 打开相机并开始连续取流（预览用）；index < 0 表示沿用参数中的序号 */
+    /** 打开相机并开始后台连续取流（长连接）；index < 0 表示沿用参数中的序号 */
     bool connectCamera(int index = -1);
-    /** 停止取流并关闭相机 */
+    /** 停止取流并关闭相机（内部/异常路径使用，不影响自动重连策略） */
+    void closeCamera();
+    /** 用户在弹窗中主动断开：停止取流，并且执行时不再自动重连 */
     void disconnectCamera();
-    /** 取一帧；timeoutMs < 0 时使用参数「取帧超时」 */
-    cv::Mat grabFrame(int timeoutMs = -1);
-    QString cameraError() const { return m_camera.lastError(); }
+    /** 直接取后台线程里的最新帧（不等待） */
+    cv::Mat previewFrame(quint64 *seq = nullptr);
+    QString cameraError() const { return m_grabber.error(); }
+    /** 非致命提示，例如相机不支持设置取流帧率 */
+    QString cameraWarning() const { return m_grabber.warning(); }
 
 private:
     void ensureSdkLoaded();
+    bool ensureStarted(QString *error);
 
-    DahuaMV::DahuaCamera m_camera;
+    DahuaMV::DahuaGrabber m_grabber;
+    quint64 m_lastSeq = 0;
+    /** 用户在弹窗中主动断开后，执行时不再自动重连 */
+    bool m_autoStart = true;
 };
 
 } // namespace OVP

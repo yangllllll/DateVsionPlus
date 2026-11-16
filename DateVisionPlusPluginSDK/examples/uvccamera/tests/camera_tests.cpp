@@ -337,6 +337,61 @@ private slots:
         QCOMPARE(releaseCount, 0);
     }
 };
+
+class DahuaGrabberTest : public QObject
+{
+    Q_OBJECT
+private slots:
+    void snapshotsAreIndependent()
+    {
+        DahuaGrabber grabber;
+        cv::Mat output(1, 1, CV_8UC1, cv::Scalar(9));
+        quint64 seq = 7;
+        QVERIFY(!grabber.lastFrame(output, &seq));
+        QCOMPARE(seq, quint64(7));
+
+        auto buffer = std::make_shared<cv::Mat>(8, 6, CV_8UC1, cv::Scalar(3));
+        grabber.publishFrame(buffer);
+        QCOMPARE(grabber.m_latest->cols, 6);
+        QVERIFY(grabber.lastFrame(output, &seq));
+        QCOMPARE(seq, quint64(1));
+        QCOMPARE(cv::countNonZero(output != 3), 0);
+
+        // 输出是独立副本，修改它不能影响后台最新帧
+        output.setTo(0);
+        cv::Mat unchanged;
+        QVERIFY(grabber.lastFrame(unchanged));
+        QCOMPARE(cv::countNonZero(unchanged != 3), 0);
+
+        buffer = std::make_shared<cv::Mat>(8, 6, CV_8UC1, cv::Scalar(4));
+        grabber.publishFrame(buffer);
+        QCOMPARE(cv::countNonZero(unchanged != 3), 0);
+
+        quint64 nextSeq = 0;
+        QVERIFY(grabber.waitFrame(output, 0, 1, nullptr, &nextSeq));
+        QCOMPARE(nextSeq, quint64(2));
+        QCOMPARE(cv::countNonZero(output != 4), 0);
+        QVERIFY(!grabber.waitFrame(output, 5, nextSeq));
+    }
+
+    void stopWakesFrameWaiter()
+    {
+        DahuaGrabber grabber;
+        std::thread stopper([&] {
+            QThread::msleep(20);
+            QMutexLocker locker(&grabber.m_mutex);
+            grabber.m_stop.store(true);
+            grabber.m_cond.wakeAll();
+        });
+        QElapsedTimer elapsed;
+        elapsed.start();
+        cv::Mat output;
+        const bool gotFrame = grabber.waitFrame(output, 1500);
+        stopper.join();
+        QVERIFY(!gotFrame);
+        QVERIFY(elapsed.elapsed() < 1000);
+    }
+};
 } // namespace DahuaMV
 
 int main(int argc, char **argv)
@@ -344,12 +399,16 @@ int main(int argc, char **argv)
     QCoreApplication app(argc, argv);
     UVC::UvcGrabberTest uvcTests;
     DahuaMV::DahuaCameraTest dahuaTests;
+    DahuaMV::DahuaGrabberTest dahuaGrabberTests;
     const QString suite = qEnvironmentVariable("CAMERA_TEST_SUITE");
     if (suite == QStringLiteral("uvc"))
         return QTest::qExec(&uvcTests, argc, argv);
     if (suite == QStringLiteral("dahua"))
-        return QTest::qExec(&dahuaTests, argc, argv);
-    return QTest::qExec(&uvcTests, argc, argv) | QTest::qExec(&dahuaTests, argc, argv);
+        return QTest::qExec(&dahuaTests, argc, argv)
+               | QTest::qExec(&dahuaGrabberTests, argc, argv);
+    return QTest::qExec(&uvcTests, argc, argv)
+           | QTest::qExec(&dahuaTests, argc, argv)
+           | QTest::qExec(&dahuaGrabberTests, argc, argv);
 }
 
 #include "camera_tests.moc"

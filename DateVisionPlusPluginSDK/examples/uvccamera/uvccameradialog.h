@@ -38,6 +38,8 @@ private slots:
 private:
     void setupUi();
     void refreshCameraList();
+    /** 已连接时不枚举相机，直接显示当前相机 */
+    void populateCurrentCamera();
     void setConnectedState(bool connected);
     void stopPreview();
     /** 把界面上的分辨率 / 帧率 / 后端写回插件参数 */
@@ -55,6 +57,8 @@ private:
     QLabel *m_statusLabel = nullptr;
     QTimer *m_previewTimer = nullptr;
     int m_missedFrames = 0;
+    /** 已显示的帧序号，避免重复转换同一帧 */
+    quint64 m_lastShownSeq = 0;
 };
 
 #endif // UVCCAMERADIALOG_H

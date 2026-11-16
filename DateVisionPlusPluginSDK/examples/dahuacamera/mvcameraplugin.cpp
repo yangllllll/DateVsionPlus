@@ -17,7 +17,7 @@ MVCameraPlugin::MVCameraPlugin(QObject *parent)
 
 MVCameraPlugin::~MVCameraPlugin()
 {
-    m_camera.close();
+    m_grabber.stopGrab();
 }
 
 QList<PortDef> MVCameraPlugin::outputPorts() const
@@ -30,8 +30,14 @@ QList<ParamDef> MVCameraPlugin::inputParams() const
     return {
         intParam(QStringLiteral("camera_index"), QStringLiteral("相机序号"), 0, 0, 99, 1,
                  QStringLiteral("相机列表中的序号")),
-        intParam(QStringLiteral("timeout"), QStringLiteral("取帧超时(ms)"), 2000, 100, 10000, 100,
-                 QStringLiteral("获取帧的超时时间")),
+        floatParam(QStringLiteral("fps"), QStringLiteral("取流帧率(fps)"), 0.0, 0.0, 1000.0, 1.0,
+                   QStringLiteral("相机出图帧率；0 = 不限制（按相机最大能力出图）。"
+                                  "修改后需重新连接相机生效")),
+        boolParam(QStringLiteral("wait_new_frame"), QStringLiteral("等待新帧"), true,
+                  QStringLiteral("开启后每次执行都等待一帧新图（不会取到同一帧）；"
+                                 "关闭则直接输出后台线程当前最新帧，速度最快")),
+        intParam(QStringLiteral("timeout"), QStringLiteral("取帧超时(ms)"), 2000, 100, 30000, 100,
+                 QStringLiteral("等待新帧的最长时间，超时则本次执行失败")),
         stringParam(QStringLiteral("sdk_path"), QStringLiteral("MVSDK 路径"), QString(),
                     QStringLiteral("MVSDKmd.dll 的完整路径；留空则自动探测，"
                                    "也可用环境变量 DAHUA_MVSDK_PATH 指定"))
@@ -47,6 +53,14 @@ void MVCameraPlugin::ensureSdkLoaded()
     api->load(paramString(QStringLiteral("sdk_path")), &error);
 }
 
+bool MVCameraPlugin::ensureStarted(QString *error)
+{
+    m_grabber.setOpenOptions(paramInt(QStringLiteral("camera_index"), 0),
+                             paramString(QStringLiteral("sdk_path")),
+                             paramDouble(QStringLiteral("fps"), 0.0));
+    return m_grabber.startGrab(error);
+}
+
 bool MVCameraPlugin::execute()
 {
     clearError();
@@ -57,24 +71,35 @@ bool MVCameraPlugin::execute()
         return false;
     }
 
-    // 未连接则自动重连（首次运行或意外断联后），最多尝试 3 次
-    const int index = paramInt(QStringLiteral("camera_index"), 0);
+    // 未连接时：从未主动断开过则自动建立长连接；用户主动断开过则不再自动重连
     QString error;
-    for (int attempt = 0; attempt < 3 && !m_camera.isOpen(); ++attempt)
-        m_camera.open(index, &error);
-
-    if (!m_camera.isOpen()) {
-        setError(QStringLiteral("相机连接失败: %1").arg(error));
-        return false;
+    if (!m_grabber.isGrabbing()) {
+        if (!m_autoStart) {
+            setError(QStringLiteral("相机未连接，请先在插件窗口中连接相机"));
+            return false;
+        }
+        if (!ensureStarted(&error)) {
+            setError(QStringLiteral("相机连接失败: %1").arg(error));
+            return false;
+        }
     }
 
-    cv::Mat frame;
     const int timeout = paramInt(QStringLiteral("timeout"), 2000);
-    if (!m_camera.grab(frame, static_cast<unsigned int>(timeout), &error)) {
-        setError(QStringLiteral("取帧失败: %1").arg(error));
-        // 连接异常，关闭以允许下次自动重连
-        m_camera.close();
-        return false;
+    const bool waitNew = paramBool(QStringLiteral("wait_new_frame"), true);
+
+    cv::Mat frame;
+    quint64 frameSeq = 0;
+    if (waitNew) {
+        // 只等「比上次更新」的那一帧，杜绝过时图像
+        if (!m_grabber.waitFrame(frame, timeout, m_lastSeq, &error, &frameSeq)) {
+            setError(QStringLiteral("取帧失败: %1").arg(error));
+            return false;
+        }
+    } else if (!m_grabber.lastFrame(frame, &frameSeq)) {
+        if (!m_grabber.waitFrame(frame, timeout, 0, &error, &frameSeq)) {
+            setError(QStringLiteral("取帧失败: %1").arg(error));
+            return false;
+        }
     }
 
     if (frame.empty()) {
@@ -82,6 +107,7 @@ bool MVCameraPlugin::execute()
         return false;
     }
 
+    m_lastSeq = frameSeq;
     setOutput(QStringLiteral("output"), imageValue(frame));
 
     return true;
@@ -97,7 +123,7 @@ QDialog *MVCameraPlugin::createDialog(const cv::Mat &inputImage, QWidget *parent
 
 bool MVCameraPlugin::isConnected() const
 {
-    return m_camera.isOpen();
+    return m_grabber.isGrabbing();
 }
 
 bool MVCameraPlugin::connectCamera(int index)
@@ -107,36 +133,36 @@ bool MVCameraPlugin::connectCamera(int index)
     if (index >= 0)
         setParam(QStringLiteral("camera_index"), index);
 
+    // 参数（序号 / SDK 路径）可能变化，统一重启取图线程
+    m_grabber.stopGrab();
+
     QString error;
-    if (!m_camera.open(paramInt(QStringLiteral("camera_index"), 0), &error)) {
-        m_camera.close();
+    if (!ensureStarted(&error)) {
+        m_grabber.stopGrab();
         return false;
     }
 
-    // 对话框预览需要连续取流
-    if (!m_camera.startGrabbing(&error)) {
-        m_camera.close();
-        return false;
-    }
-
+    m_lastSeq = 0;
+    m_autoStart = true;
     return true;
+}
+
+void MVCameraPlugin::closeCamera()
+{
+    m_grabber.stopGrab();
 }
 
 void MVCameraPlugin::disconnectCamera()
 {
-    m_camera.close();
+    m_autoStart = false;
+    m_grabber.stopGrab();
 }
 
-cv::Mat MVCameraPlugin::grabFrame(int timeoutMs)
+cv::Mat MVCameraPlugin::previewFrame(quint64 *seq)
 {
-    if (timeoutMs < 0)
-        timeoutMs = paramInt(QStringLiteral("timeout"), 2000);
-
     cv::Mat frame;
-    QString error;
-    if (!m_camera.grab(frame, static_cast<unsigned int>(timeoutMs), &error))
+    if (!m_grabber.lastFrame(frame, seq))
         return cv::Mat();
-
     return frame;
 }
 
