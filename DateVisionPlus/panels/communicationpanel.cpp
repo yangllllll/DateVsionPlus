@@ -71,6 +71,7 @@ CommunicationPanel::CommunicationPanel(QWidget *parent)
 
     connect(m_server, &TcpServer::logMessage, this, &CommunicationPanel::appendLog);
     connect(m_server, &TcpServer::triggerReceived, this, &CommunicationPanel::executeRequested);
+    connect(m_server, &TcpServer::responseTimedOut, this, &CommunicationPanel::responseTimedOut);
     connect(m_server, &TcpServer::clientCountChanged, this, [this](int count) {
         ui->lblClientCount->setText(QStringLiteral("连接: %1").arg(count));
     });
@@ -91,6 +92,16 @@ CommunicationPanel::~CommunicationPanel()
 int CommunicationPanel::sendDelayMs() const
 {
     return ui->spinSendDelay->value();
+}
+
+bool CommunicationPanel::canSendResponse() const
+{
+    return m_server->isListening() && m_server->hasClient();
+}
+
+void CommunicationPanel::discardPendingTrigger()
+{
+    m_server->discardPendingResponse();
 }
 
 QString CommunicationPanel::outputFormat() const

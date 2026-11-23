@@ -8,6 +8,17 @@ QT += widgets network
 TARGET = DateVisionPlus
 TEMPLATE = app
 
+# 版本号：同时写入可执行文件的版本资源（Explorer 属性页可见）
+VERSION = 2.0.6
+QMAKE_TARGET_PRODUCT = DateVisionPlus
+QMAKE_TARGET_DESCRIPTION = 工业视觉检测平台
+QMAKE_TARGET_COMPANY = 郑州德塔工业自动化
+QMAKE_TARGET_COPYRIGHT = Copyright (C) 2026 郑州德塔工业自动化
+
+# Windows 可执行文件图标（任务栏 / 资源管理器 / 快捷方式）
+# 用绝对路径，避免 qmake 在构建目录生成 .rc 时找不到相对路径下的图标
+RC_ICONS = $$PWD/resources/icons/app.ico
+
 CONFIG += c++17
 
 # 主程序导出核心库符号，供用户插件 DLL（Qt Plugin）链接

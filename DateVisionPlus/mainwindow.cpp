@@ -21,6 +21,7 @@
 #include "plugins/linefinderplugin.h"
 #include "plugins/patternmatchplugin.h"
 
+#include <QApplication>
 #include <QDialog>
 #include <QFontMetrics>
 #include <QHBoxLayout>
@@ -387,6 +388,8 @@ void MainWindow::setupConnections()
 
     connect(ui->communicationPanel, &CommunicationPanel::executeRequested, this,
             &MainWindow::onCommTrigger);
+    connect(ui->communicationPanel, &CommunicationPanel::responseTimedOut, this,
+            &MainWindow::onCommResponseTimedOut);
 }
 
 // ------------------------------------------------------------------ 文件操作
@@ -542,6 +545,14 @@ void MainWindow::onToggleContinuous(bool checked)
 void MainWindow::onStop()
 {
     m_stopRequested = m_executing;
+
+    // 停止即放弃本轮通信回包：不补发结果，也不留下待回包状态
+    if (m_commTriggered) {
+        m_commTriggered = false;
+        ui->communicationPanel->discardPendingTrigger();
+        ui->outputPanel->logWarning(QStringLiteral("已停止，本轮不再回发通信结果"));
+    }
+
     setRunResult(QStringLiteral("已停止"), "idle");
     m_worker->requestStop();
     // setChecked(false) 会触发 toggled 信号，从而调用 onToggleContinuous(false)
@@ -579,14 +590,15 @@ void MainWindow::onFit()
 void MainWindow::onAbout()
 {
     QMessageBox::about(this, QStringLiteral("关于 DateVisionPlus"),
-                       QStringLiteral("<h3>DateVisionPlus 工业视觉检测平台 v2.0.5</h3>"
+                       QStringLiteral("<h3>DateVisionPlus 工业视觉检测平台 v%1</h3>"
                                       "<p>基于 Qt6 + OpenCV (C++) 构建</p>"
                                       "<p>开源免费，无授权限制</p>"
                                       "<hr>"
                                       "<p><b>开发者：</b>杨佳祺</p>"
                                       "<p><b>联系电话：</b>15803820398</p>"
                                       "<p><b>联系邮箱：</b>yangjiaqi@datekj.top</p>"
-                                      "<p><b>版权所有：</b>郑州德塔工业自动化</p>"));
+                                      "<p><b>版权所有：</b>郑州德塔工业自动化</p>")
+                           .arg(QApplication::applicationVersion()));
 }
 
 void MainWindow::onRefreshPlugins()
@@ -629,10 +641,37 @@ void MainWindow::reloadPlugins()
 
 void MainWindow::onCommTrigger()
 {
+    // 正在执行（含连续运行）：忽略本次触发、不另起一轮，
+    // 但保留待回包状态，改用「本轮」结果组装字符串回发，避免结果与触发错位。
+    if (m_executing || m_continuousMode) {
+        m_commTriggered = true;
+        ui->outputPanel->logWarning(
+            QStringLiteral("执行中收到 TCP 触发，已忽略本次拍照，将回发本轮结果"));
+        return;
+    }
+
+    // 参数编辑期间无法执行：先回 BUSY，走正常回包路径（同样受发送延迟影响），
+    // 回包即视为本次请求已消费，无需再 discard（否则延迟队列里的 BUSY 会被清掉）。
+    if (m_editing) {
+        ui->communicationPanel->setResponseData(QStringLiteral("ERROR:BUSY"));
+        ui->outputPanel->logWarning(QStringLiteral("参数编辑中，本次触发已返回 BUSY"));
+        return;
+    }
+
     ui->outputPanel->logInfo(QStringLiteral("TCP通信触发检测..."));
     // 执行已改为异步，标志位在 onExecutionFinished() 中复位
     m_commTriggered = true;
     doExecute();
+}
+
+void MainWindow::onCommResponseTimedOut()
+{
+    if (!m_commTriggered)
+        return;
+
+    // 客户端已经收到 ERROR:TIMEOUT，本轮结果不再补发，避免一次请求收到两个包
+    m_commTriggered = false;
+    ui->outputPanel->logWarning(QStringLiteral("通信响应超时，本轮结果不再回发"));
 }
 
 // ------------------------------------------------------------------ 节点交互
@@ -796,10 +835,8 @@ void MainWindow::doExecute()
     // 上一轮尚未结束：直接跳过本次触发，避免事件与任务堆积。
     // 必须放在采集图数据之前 —— 0ms 排期下这里的调用频率很高。
     if (m_executing || m_editing) {
-        if (m_commTriggered) {
-            ui->communicationPanel->setResponseData(QStringLiteral("ERROR:BUSY"));
-            m_commTriggered = false;
-        }
+        // 已有一轮在跑（或正在编辑参数）：忽略本次触发。
+        // 通信触发在 onCommTrigger() 里已被标记为「用本轮结果回发」，这里不要清除标记。
         return;
     }
 
@@ -820,8 +857,16 @@ void MainWindow::doExecute()
         m_worker->setGraph(plugins, links);
         m_graphDirty = false;
     }
-    if (!m_worker->prepareRun(!m_continuousMode))
+    if (!m_worker->prepareRun(!m_continuousMode)) {
+        // 后台线程还在收尾（m_busy 尚未释放），本轮没能启动。
+        // 这里必须把通信标记消费掉，否则它会残留到后面某一轮，把那轮结果回给这条旧请求。
+        if (m_commTriggered) {
+            ui->communicationPanel->setResponseData(QStringLiteral("ERROR:BUSY"));
+            ui->outputPanel->logWarning(QStringLiteral("执行器忙，本次触发请求已返回 BUSY"));
+            m_commTriggered = false;
+        }
         return;
+    }
 
     m_stopRequested = false;
     m_executionClock.start();
@@ -864,8 +909,11 @@ void MainWindow::onExecutionFinished(const QMap<QString, QVariant> &results,
     m_executing = false;
     updateBusyUi();
 
-    // 通信响应不能跟随显示节拍丢帧，也无需为本地运行逐轮计算格式表达式。
-    if (m_commTriggered) {
+    // 只有收到通信触发的轮次才回发结果：
+    //   - 触发发生在空闲时：本轮就是它触发的；
+    //   - 触发发生在执行中：已忽略拍照，但标记仍然置位，这里用本轮的运行结果回发。
+    // 界面点击运行 / 连续运行且无触发时，不向 socket 发送任何数据。
+    if (m_commTriggered && ui->communicationPanel->canSendResponse()) {
         const QString delimiter = ui->communicationPanel->delimiter();
         QStringList statusParts;
         statusParts.reserve(order.size());
@@ -884,8 +932,8 @@ void MainWindow::onExecutionFinished(const QMap<QString, QVariant> &results,
         ui->outputPanel->logInfo(QStringLiteral("通信响应: %1%2")
                                      .arg(response.left(200),
                                           response.length() > 200 ? QStringLiteral("...") : QString()));
-        m_commTriggered = false;
     }
+    m_commTriggered = false;
 
     if (!error.isEmpty() && present)
         ui->outputPanel->logError(error);

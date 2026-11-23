@@ -24,6 +24,15 @@ public:
     void stopServer();
     bool isListening() const;
 
+    /** 是否存在已连接的客户端（只有存在时才需要回发结果） */
+    bool hasClient() const;
+
+    /**
+     * 丢弃当前待回发的触发请求：停止超时计时与延迟发送，且不再回包。
+     * 用于「执行过程中收到触发，直接忽略」的场景。
+     */
+    void discardPendingResponse();
+
     /**
      * 结果发送延迟（毫秒）。
      * 部分客户端（PLC 等）发出触发后需要时间切换到接收状态，
@@ -41,6 +50,8 @@ signals:
     void triggerReceived();
     void clientCountChanged(int count);
     void listeningChanged(bool listening);
+    /** 等待结果超时（已回 ERROR:TIMEOUT），该请求随之作废 */
+    void responseTimedOut();
 
 private slots:
     void onNewConnection();
@@ -51,6 +62,10 @@ private slots:
 
 private:
     QTcpSocket *senderSocket() const { return m_pendingSocket; }
+    /** 最近一个仍处于连接状态的客户端（无触发来源时作为回发目标） */
+    QTcpSocket *lastConnectedSocket() const;
+    /** 处理一次控制字触发（一个数据包里可能连续出现多次） */
+    void handleTrigger(QTcpSocket *socket);
 
     QTcpServer *m_server = nullptr;
     QList<QTcpSocket *> m_clients;

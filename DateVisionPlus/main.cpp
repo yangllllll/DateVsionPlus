@@ -3,6 +3,7 @@
 #include <QApplication>
 #include <QFile>
 #include <QFont>
+#include <QIcon>
 #include <QPalette>
 #include <QLocale>
 #include <QTranslator>
@@ -12,7 +13,9 @@ int main(int argc, char *argv[])
     QApplication app(argc, argv);
     app.setApplicationName(QStringLiteral("DateVisionPlus"));
     app.setOrganizationName(QStringLiteral("DateVisionPlus"));
-    app.setApplicationVersion(QStringLiteral("2.0.5"));
+    app.setApplicationVersion(QStringLiteral("2.0.6"));
+    // 窗口 / 任务栏图标（exe 图标由 .pro 的 RC_ICONS 提供）
+    app.setWindowIcon(QIcon(QStringLiteral(":/icons/app.png")));
 
     // 默认字体与 Fusion 暗色主题
     app.setFont(QFont(QStringLiteral("Microsoft YaHei"), 9));

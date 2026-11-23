@@ -59,6 +59,8 @@ private slots:
     void onNodeDoubleClicked(OVP::NodeItem *node);
 
     void onCommTrigger();
+    /** 本次触发已因超时回过 ERROR:TIMEOUT，作废标记，避免本轮结束时再补发一次 */
+    void onCommResponseTimedOut();
     void doExecute();
 
     // ---- 后台执行回调（均由 GUI 线程执行）----

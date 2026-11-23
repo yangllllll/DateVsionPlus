@@ -79,13 +79,33 @@ bool TcpServer::isListening() const
     return m_server->isListening();
 }
 
+bool TcpServer::hasClient() const
+{
+    return lastConnectedSocket() != nullptr;
+}
+
+void TcpServer::discardPendingResponse()
+{
+    m_timeoutTimer->stop();
+    m_sendTimer->stop();
+    m_waitingResponse = false;
+    m_pendingSocket = nullptr;
+    m_pendingData.clear();
+}
+
+QTcpSocket *TcpServer::lastConnectedSocket() const
+{
+    for (int i = m_clients.size() - 1; i >= 0; --i) {
+        if (m_clients.at(i)->state() == QAbstractSocket::ConnectedState)
+            return m_clients.at(i);
+    }
+    return nullptr;
+}
+
 void TcpServer::setResponse(const QString &data)
 {
-    if (!m_waitingResponse)
-        return;
-
-    m_waitingResponse = false;
     m_timeoutTimer->stop();
+    m_waitingResponse = false;
 
     m_pendingData = data;
     if (m_sendDelayMs > 0) {
@@ -100,10 +120,13 @@ void TcpServer::sendPendingResponse()
 {
     m_sendTimer->stop();
 
+    // 优先回给触发本次检测的客户端；若是界面/连续执行触发的，则回给当前连接的客户端
     QTcpSocket *socket = m_pendingSocket;
     m_pendingSocket = nullptr;
     const QString data = std::exchange(m_pendingData, QString());
     if (!socket || socket->state() != QAbstractSocket::ConnectedState)
+        socket = lastConnectedSocket();
+    if (!socket)
         return;
 
     socket->write((data + QStringLiteral("\n")).toUtf8());
@@ -140,13 +163,31 @@ void TcpServer::onSocketReadyRead()
     m_buffer.append(socket->readAll());
 
     const QByteArray controlBytes = m_controlWord.toUtf8();
+    if (controlBytes.isEmpty())
+        return;
+
     const int index = m_buffer.indexOf(controlBytes);
     if (index < 0)
         return;
 
     m_buffer.remove(0, index + controlBytes.length());
+
+    // 同一批数据里出现多个控制字时只按「一次触发」处理：
+    // 把剩余的重复控制字一并丢弃，否则它们会滞留在缓冲区，
+    // 等下一批数据到达时被误当成新的触发。
+    m_buffer.replace(controlBytes, QByteArray());
+
+    handleTrigger(socket);
+}
+
+void TcpServer::handleTrigger(QTcpSocket *socket)
+{
     emit logMessage(QStringLiteral("收到控制字 '%1'，触发检测").arg(m_controlWord),
                     QStringLiteral("#ce93d8"));
+
+    // 上一轮结果可能还在延迟队列里：先发出去，避免它误用到本次触发的 socket
+    if (m_sendTimer->isActive())
+        sendPendingResponse();
 
     m_response.clear();
     m_waitingResponse = true;
@@ -185,4 +226,7 @@ void TcpServer::onResponseTimeout()
     socket->write("ERROR:TIMEOUT\n");
     socket->flush();
     emit logMessage(QStringLiteral("等待检测结果超时"), QStringLiteral("#f44336"));
+
+    // 通知主窗口作废这条请求：本轮即使随后跑完，也不再补发第二个包
+    emit responseTimedOut();
 }
