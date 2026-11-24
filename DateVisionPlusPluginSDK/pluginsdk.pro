@@ -17,5 +17,7 @@ SUBDIRS += \
     examples/plc \
     examples/uvccamera \
     examples/yolodetect \
-    examples/materialzone
+    examples/materialzone \
+    examples/npointcalib \
+    examples/randompick
 

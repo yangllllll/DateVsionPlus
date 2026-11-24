@@ -30,7 +30,10 @@ OpenVisionPlusPluginSDK/
 ├── examples/uvccamera/        # UVC 摄像头插件：后台线程连续取图，执行时直接输出最新帧
 ├── examples/poseestimation/   # PnP 位姿估计：2D/3D 对应点、RANSAC、重投影预览
 ├── examples/yolodetect/       # YOLO 目标识别：OpenCV DNN / ONNX Runtime 推理 ONNX
-└── examples/materialzone/     # 物料识别：按检测区判断 YOLO 目标中心，输出命中编号
+├── examples/materialzone/     # 物料识别：按检测区判断 YOLO 目标中心，输出命中编号
+├── examples/npointcalib/      # N点标定：图像坐标 -> 机器人坐标，保存 .ncal
+├── examples/randompick/       # 无序抓取：按标定文件把 YOLO 目标转换为机器人坐标
+└── examples/common/           # 公用代码：标定数据/文件、detections 解析
 ```
 
 ## 快速开始（3 步）
@@ -106,6 +109,8 @@ public:
 | `examples/uvccamera/` | `uvc_camera` | 标准 UVC 摄像头：后台线程连续取图，执行时只输出最新帧 |
 | `examples/yolodetect/` | `user_yolo_detect` | YOLO 目标识别：OpenCV DNN / ONNX Runtime 推理 ONNX，支持 YOLOv8/v11、v5、已 NMS 导出 |
 | `examples/materialzone/` | `material_zone` | 物料识别：按检测区判断 YOLO 目标中心，输出最小命中编号；弹窗右侧拖拽绘制 ROI |
+| `examples/npointcalib/` | `npoint_calib` | N 点标定：录入图像/机器人对应点，最小二乘拟合仿射变换，保存 `.ncal` |
+| `examples/randompick/` | `random_pick` | 无序抓取：用标定文件把 YOLO 目标中心转换为机器人坐标 |
 | `examples/poseestimation/` | `pose_estimation` | 已知相机内参及 2D/3D 对应点求解位姿，支持 RANSAC、LM 优化与重投影预览 |
 
 ### PnP 位姿估计插件（`examples/poseestimation/`）
@@ -229,6 +234,47 @@ YOLO目标识别 ── detections ──▶ 物料识别(检测区) ── zone
 - **对话框**：左侧是检测区列表（编号 / X / Y / 宽 / 高）与参数；
   **右侧图像画布上按住左键拖拽即可新建检测区**，单击选中、`Delete` 删除，
   也可用「删除选中 / 清空」按钮。新区域编号自动取当前最大编号 + 1。
+
+### N点标定 / 无序抓取（`examples/npointcalib/`、`examples/randompick/`）
+
+典型流程：
+
+```
+相机 ── image ──▶ YOLO目标识别 ── detections ──▶ N点标定（取点/标定）
+                                     └──────────▶ 无序抓取 ── robot_x/robot_y ──▶ 机器人/PLC
+```
+
+**N点标定（`npoint_calib`，分类「标定」）**
+
+- 模型：二维仿射变换，至少 **3 组**对应点（建议 4~9 组并分散到画面四周）
+  ```
+  x = a*u + b*v + c
+  y = d*u + e*v + f
+  ```
+  最小二乘求解（`cv::solve` + SVD），点共线/过于集中时会明确报错。
+- 输入：`input`（图像，可选，用于预览）、`detections`（YOLO 结果，用于取点）。
+- 输出：`calib_ok`、`point_count`、`rms`、`matrix`（`[a,b,c,d,e,f]`）。
+- 对话框：打开时**自动读取当前 YOLO 检测结果**，把每个检测框中心按序号填入表格的
+  `图像 X/Y`（不需要手动选点），并在右侧图像上标注点序号与位置；
+  机器人 `X/Y` 手动填写。检测结果变化后可点「自动取点」重建列表
+  （已填写的机器人坐标按行号保留）。
+  支持「计算标定」「保存文件」「加载文件」，`rms` 为拟合残差（机器人坐标单位）。
+- 标定结果同时写入 `extraData`（随项目保存）；`.ncal` 为 JSON 文本，包含点、矩阵、RMS。
+
+> 取点前先运行一次流程，让 YOLO 输出 `detections`（结果会保留在节点输入里），
+> 再打开标定窗口即可自动看到点位。
+
+**无序抓取（`random_pick`，分类「机器人」）**
+
+- 参数：`calib_file`（N点标定保存的 `.ncal`，必需）、`pick_index`（0 = 第一个，按置信度降序）、
+  `min_score`、`class_filter`、`draw`、`line_thickness`。
+- 输入：`detections`（必需）、`input`（图像，可选，用于标注）。
+- 输出：`robot_x`、`robot_y`、`robot_point`（`[x,y]`）、`pixel_x`、`pixel_y`、
+  `class_id`、`class_name`、`confidence`、`pick_index`、`output`（标注图像）。
+- 行为：按置信度降序取第 `pick_index` 个目标，用标定矩阵把检测框中心转换成机器人坐标；
+  标定文件按路径 + 修改时间缓存，运行中修改文件会自动重新加载。
+- 对话框：选择标定文件（会显示点数与 RMS）、目标序号、置信度/类别过滤、线宽；
+  「测试转换」用上游图像与已收到的 YOLO 结果试跑并显示机器人坐标。
 
 ## 高频路径优化与验证
 
