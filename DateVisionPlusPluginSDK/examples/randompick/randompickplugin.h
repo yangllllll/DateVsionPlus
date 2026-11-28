@@ -31,7 +31,7 @@ public:
     ~RandomPickPlugin() override = default;
 
     QString id() const override { return QStringLiteral("random_pick"); }
-    QString name() const override { return QStringLiteral("无序抓取"); }
+    QString name() const override { return QStringLiteral("标定转换"); }
     QString category() const override { return QStringLiteral("机器人"); }
     QString description() const override
     {

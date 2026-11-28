@@ -283,9 +283,11 @@ YOLO目标识别 ── detections ──▶ 物料识别(检测区) ── zone
   `getFrame` 的失败诊断（`withDiagnostics = false`），避免每次超时都额外查询统计和触发模式。
   SDK 像素转换直接写入最终图像，减少一次整帧复制；临时取流和 SDK 帧通过作用域守卫释放。
   Bayer GB8 原始灰度输出按行处理 padding。`grab()` 仅保留给独立测试代码。
-- **WebSocket**：输入版本和 JPEG 质量未变时复用完整编码帧，多客户端共用一次封装；
-  慢客户端有待发送数据时跳过本轮，全部客户端繁忙时跳过编码。仍按设定帧率重发最后一帧。
-  工作线程通过加锁的最新帧缓存和合并的配置请求与网络线程交互，socket 和 timer 由对象所属线程操作。
+- **WebSocket**：插件的 `execute()` 只把图像写入缓冲变量（深拷贝），编码与发送由启动时创建的
+  独立线程（`WebSocketSender`）完成；`QTcpServer` / socket / 定时器都归该线程所有，
+  因此流程暂停、UI 线程繁忙时仍按设定帧率持续发送最后一帧。
+  缓冲变量版本号与 JPEG 质量未变时复用完整编码帧，多客户端共用一次封装；
+  慢客户端有待发送数据时跳过本轮，全部客户端繁忙时跳过编码。
 - **PLC**：单字节读写使用栈内存；连接按 IP、rack、slot 完整匹配后复用；
   多字节读写按 Snap7 元素大小分配缓冲区并检查长度。相同结果仍每轮写入，默认「执行后断开」保持不变。
 - **YOLO**：模型按「绝对路径 + 类别文件」缓存，多个节点共用同一个 Net / OrtSession；
@@ -298,7 +300,7 @@ YOLO目标识别 ── detections ──▶ 物料识别(检测区) ── zone
 | 测试工程 | 主要覆盖 |
 |---|---|
 | `examples/uvccamera/tests/camera_tests.pro` | 图像所有权、并发帧序号、停止唤醒、大华直接转换与取流清理 |
-| `examples/websocketserver/tests/websocketserver_tests.pro` | 编码缓存、慢客户端、跨线程执行、握手连接清理 |
+| `examples/websocketserver/tests/websocketserver_tests.pro` | 后台线程持续发送、缓冲深拷贝、跨线程执行、启停与握手清理 |
 | `examples/plc/tests/plc-tests.pro` | 模拟 Snap7 动态库、连接复用、周期写入、字长与缓冲区边界 |
 
 WebSocket 回归工程需要相邻 `DateVisionPlus/core` 下的基类实现源码；分发 SDK 后单独构建插件不受影响。

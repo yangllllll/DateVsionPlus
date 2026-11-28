@@ -31,19 +31,19 @@ QList<PortDef> PLCSendPlugin::outputPorts() const
 QList<ParamDef> PLCSendPlugin::inputParams() const
 {
     return {
-        stringParam(QStringLiteral("ip"), QStringLiteral("PLC地址"), QStringLiteral("192.168.8.40"),
+        stringParam(QStringLiteral("ip"), QStringLiteral("PLC地址"), QStringLiteral("192.168.40.70"),
                     QStringLiteral("PLC IP 地址")),
         intParam(QStringLiteral("rack"), QStringLiteral("机架号"), 0, 0, 7, 1,
                  QStringLiteral("Rack（Python 版固定为 0）")),
         intParam(QStringLiteral("slot"), QStringLiteral("插槽号"), 1, 0, 31, 1,
                  QStringLiteral("Slot（Python 版固定为 1）")),
-        choiceParam(QStringLiteral("area"), QStringLiteral("区域"), QStringLiteral("MK"),
+        choiceParam(QStringLiteral("area"), QStringLiteral("区域"), QStringLiteral("DB"),
                     QStringList{QStringLiteral("MK"), QStringLiteral("DB"), QStringLiteral("PA"),
                                 QStringLiteral("PE")},
                     QStringLiteral("写入的 PLC 存储区，对应 snap7.Area（MK=M, DB=数据块）")),
-        intParam(QStringLiteral("db"), QStringLiteral("DB块号"), 0, 0, 65535, 1,
+        intParam(QStringLiteral("db"), QStringLiteral("DB块号"), 19, 0, 65535, 1,
                  QStringLiteral("区域为 DB 时有效（Python 版固定为 0）")),
-        intParam(QStringLiteral("address"), QStringLiteral("字节地址"), 100, 0, 65535, 1,
+        intParam(QStringLiteral("address"), QStringLiteral("字节地址"), 7, 0, 65535, 1,
                  QStringLiteral("写入的起始字节地址（Python 版固定为 100）")),
         boolParam(QStringLiteral("disconnect_after_write"), QStringLiteral("执行后断开"), true,
                   QStringLiteral("与 Python 版一致：写完立即断开；取消勾选可复用连接以提升速度"))

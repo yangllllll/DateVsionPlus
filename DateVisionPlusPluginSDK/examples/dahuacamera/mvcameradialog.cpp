@@ -23,7 +23,7 @@ MVCameraDialog::MVCameraDialog(OVP::MVCameraPlugin *plugin, QWidget *parent)
     : QDialog(parent)
     , m_plugin(plugin)
 {
-    setWindowTitle(QStringLiteral("大华相机 - 预览与设置"));
+    setWindowTitle(QStringLiteral("GigE相机 - 预览与设置"));
     resize(800, 600);
     setMinimumSize(640, 480);
 

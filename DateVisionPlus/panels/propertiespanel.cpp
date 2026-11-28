@@ -132,7 +132,7 @@ void PropertiesPanel::setNode(OVP::NodeItem *node)
     clearForm();
 
     if (!node) {
-        auto *caption = new QLabel(QStringLiteral("PARAMETERS / 参数配置"), this);
+        auto *caption = new QLabel(QStringLiteral("节点参数"), this);
         caption->setProperty("uiRole", "caption");
         m_form->addRow(caption);
         auto *hint = new QLabel(QStringLiteral("等待选择节点\n\n在流程画布中选择一个工具，\n查看并调整运行参数。"), this);

@@ -37,7 +37,7 @@ RandomPickDialog::RandomPickDialog(OVP::RandomPickPlugin *plugin, const cv::Mat 
     , m_plugin(plugin)
     , m_image(image)
 {
-    setWindowTitle(QStringLiteral("无序抓取 - 设置"));
+    setWindowTitle(QStringLiteral("标定转换 - 设置"));
     resize(1000, 680);
     setMinimumSize(760, 500);
 

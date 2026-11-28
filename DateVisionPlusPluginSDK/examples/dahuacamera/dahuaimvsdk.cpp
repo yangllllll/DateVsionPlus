@@ -398,7 +398,7 @@ bool DahuaCamera::open(int index, QString *error)
 
     setEnumFeature("TriggerSource", "Software");
     setEnumFeature("TriggerSelector", "FrameStart");
-
+    setEnumFeature("ExposureAuto","Continuous");
     // 下面两个仅 GigE 有效，U3V 会失败，忽略即可
     setIntFeature("GevSCPSPacketSize", static_cast<long long>(m_packetSize));
     setIntFeature("GevStreamChannelSelector", 0);

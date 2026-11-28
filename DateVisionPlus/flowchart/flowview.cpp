@@ -5,6 +5,7 @@
 
 #include <QDragEnterEvent>
 #include <QDropEvent>
+#include <QMouseEvent>
 #include <QMimeData>
 #include <QPainter>
 #include <QScrollBar>
@@ -106,6 +107,46 @@ void FlowView::wheelEvent(QWheelEvent *event)
     else
         zoomOut();
     event->accept();
+}
+
+void FlowView::mousePressEvent(QMouseEvent *event)
+{
+    if (event->button() == Qt::MiddleButton) {
+        // 中键平移：不进入场景，避免与节点/连线的选择、框选冲突
+        m_panning = true;
+        m_panAnchor = event->position().toPoint();
+        setCursor(Qt::ClosedHandCursor);
+        event->accept();
+        return;
+    }
+    QGraphicsView::mousePressEvent(event);
+}
+
+void FlowView::mouseMoveEvent(QMouseEvent *event)
+{
+    if (m_panning) {
+        const QPoint pos = event->position().toPoint();
+        const QPoint delta = pos - m_panAnchor;
+        m_panAnchor = pos;
+
+        // 滚动条单位即视口像素，直接减去位移量即可
+        horizontalScrollBar()->setValue(horizontalScrollBar()->value() - delta.x());
+        verticalScrollBar()->setValue(verticalScrollBar()->value() - delta.y());
+        event->accept();
+        return;
+    }
+    QGraphicsView::mouseMoveEvent(event);
+}
+
+void FlowView::mouseReleaseEvent(QMouseEvent *event)
+{
+    if (m_panning && event->button() == Qt::MiddleButton) {
+        m_panning = false;
+        unsetCursor();
+        event->accept();
+        return;
+    }
+    QGraphicsView::mouseReleaseEvent(event);
 }
 
 void FlowView::dragEnterEvent(QDragEnterEvent *event)

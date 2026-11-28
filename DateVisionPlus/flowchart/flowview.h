@@ -31,6 +31,10 @@ public:
 protected:
     void drawBackground(QPainter *painter, const QRectF &rect) override;
     void wheelEvent(QWheelEvent *event) override;
+    /** 按住鼠标中键拖动平移画布 */
+    void mousePressEvent(QMouseEvent *event) override;
+    void mouseMoveEvent(QMouseEvent *event) override;
+    void mouseReleaseEvent(QMouseEvent *event) override;
     void dragEnterEvent(QDragEnterEvent *event) override;
     void dragMoveEvent(QDragMoveEvent *event) override;
     void dropEvent(QDropEvent *event) override;
@@ -40,6 +44,8 @@ private:
 
     OVP::FlowScene *m_scene = nullptr;
     qreal m_zoom = 1.0;
+    bool m_panning = false;
+    QPoint m_panAnchor;
 };
 
 #endif // FLOWVIEW_H

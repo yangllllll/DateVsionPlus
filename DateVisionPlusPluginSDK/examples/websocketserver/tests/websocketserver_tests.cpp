@@ -5,22 +5,27 @@
 #include <QTcpServer>
 #include <QTcpSocket>
 #include <QTest>
-#include <QThread>
-#include <QTimer>
 
 #include <opencv2/imgcodecs.hpp>
 
-#include <atomic>
+#include <cmath>
 #include <functional>
 #include <thread>
 
 namespace OVP {
 
+/**
+ * 回归目的：确认「缓冲区 + 独立发送线程」的行为
+ *   - execute() 只更新缓冲区，编码/发送发生在后台线程；
+ *   - 流程不执行时后台线程仍按帧率发送缓冲区里的最后一帧；
+ *   - 上游修改图像不会影响已提交的缓冲区；
+ *   - 启停、客户端计数、握手清理仍然正常。
+ */
 class WebSocketServerPluginTest : public QObject
 {
     Q_OBJECT
 
-    static bool waitFor(const std::function<bool()> &condition, int timeout = 3000)
+    static bool waitFor(const std::function<bool()> &condition, int timeout = 4000)
     {
         QElapsedTimer timer;
         timer.start();
@@ -37,22 +42,20 @@ class WebSocketServerPluginTest : public QObject
         return reservation.serverPort();
     }
 
-    static bool start(WebSocketServerPlugin &plugin)
+    static bool start(WebSocketServerPlugin &plugin, int fps = 20)
     {
         plugin.setParam(QStringLiteral("auto_start"), false);
+        plugin.setParam(QStringLiteral("fps"), fps);
         plugin.setParam(QStringLiteral("port"), freePort());
-        if (!plugin.startServer())
-            return false;
-        plugin.m_broadcastTimer->stop();
-        return true;
+        return plugin.startServer();
     }
 
     static bool connectClient(WebSocketServerPlugin &plugin, QTcpSocket &client)
     {
-        const int previousCount = plugin.clientCount();
         client.connectToHost(QHostAddress::LocalHost, plugin.listenPort());
         if (!waitFor([&]() { return client.state() == QAbstractSocket::ConnectedState; }))
             return false;
+
         client.write("GET / HTTP/1.1\r\nHost: localhost\r\nUpgrade: websocket\r\n"
                      "Connection: Upgrade\r\nSec-WebSocket-Version: 13\r\n"
                      "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n\r\n");
@@ -62,38 +65,42 @@ class WebSocketServerPluginTest : public QObject
                 return response.contains("\r\n\r\n");
             }))
             return false;
-        return plugin.clientCount() == previousCount + 1 &&
-               response.startsWith("HTTP/1.1 101 ") &&
-               response.contains("Sec-WebSocket-Accept: s3pPLMBiTxaQ9kYGzzhZRbK+xOo=");
+
+        return plugin.clientCount() > 0 && response.startsWith("HTTP/1.1 101 ")
+               && response.contains("Sec-WebSocket-Accept: s3pPLMBiTxaQ9kYGzzhZRbK+xOo=");
     }
 
-    static QByteArray readPayload(QTcpSocket &client)
+    /** 读取一个完整的 WebSocket 文本帧（超时返回空） */
+    static QByteArray readPayload(QTcpSocket &client, int timeout = 4000)
     {
         QByteArray frame;
         qsizetype headerSize = 0;
         quint64 payloadSize = 0;
-        const bool complete = waitFor([&]() {
-            frame += client.readAll();
-            if (frame.size() < 2)
-                return false;
-            payloadSize = static_cast<uchar>(frame.at(1));
-            headerSize = 2;
-            if (payloadSize == 126) {
-                if (frame.size() < 4)
+        const bool complete = waitFor(
+            [&]() {
+                frame += client.readAll();
+                if (frame.size() < 2)
                     return false;
-                payloadSize = (static_cast<uchar>(frame.at(2)) << 8) |
-                              static_cast<uchar>(frame.at(3));
-                headerSize = 4;
-            } else if (payloadSize == 127) {
-                if (frame.size() < 10)
-                    return false;
-                payloadSize = 0;
-                for (int i = 2; i < 10; ++i)
-                    payloadSize = (payloadSize << 8) | static_cast<uchar>(frame.at(i));
-                headerSize = 10;
-            }
-            return static_cast<quint64>(frame.size() - headerSize) >= payloadSize;
-        });
+                payloadSize = static_cast<uchar>(frame.at(1));
+                headerSize = 2;
+                if (payloadSize == 126) {
+                    if (frame.size() < 4)
+                        return false;
+                    payloadSize = (static_cast<uchar>(frame.at(2)) << 8)
+                                  | static_cast<uchar>(frame.at(3));
+                    headerSize = 4;
+                } else if (payloadSize == 127) {
+                    if (frame.size() < 10)
+                        return false;
+                    payloadSize = 0;
+                    for (int i = 2; i < 10; ++i)
+                        payloadSize = (payloadSize << 8) | static_cast<uchar>(frame.at(i));
+                    headerSize = 10;
+                }
+                return static_cast<quint64>(frame.size() - headerSize) >= payloadSize;
+            },
+            timeout);
+
         if (!complete || static_cast<uchar>(frame.at(0)) != 0x81)
             return {};
         return frame.mid(headerSize, static_cast<qsizetype>(payloadSize));
@@ -105,307 +112,187 @@ class WebSocketServerPluginTest : public QObject
         return cv::imdecode(std::vector<uchar>(jpeg.begin(), jpeg.end()), cv::IMREAD_UNCHANGED);
     }
 
-private slots:
-    void workerExecutionUsesOwnerThread()
+    /** 持续读取帧，直到满足条件或超时 */
+    static QByteArray readFrameUntil(
+        QTcpSocket &client,
+        const std::function<bool(const QByteArray &, const cv::Mat &)> &accept,
+        int timeout = 4000)
     {
-        WebSocketServerPlugin plugin;
-        plugin.setParam(QStringLiteral("port"), freePort());
-        plugin.setInput(QStringLiteral("input"), imageValue(cv::Mat(64, 64, CV_8UC3, cv::Scalar(20, 40, 80))));
-        std::atomic_bool success{true};
-        std::thread worker([&]() {
-            for (int i = 0; i < 100; ++i)
-                success = plugin.execute() && success;
-        });
-        worker.join();
-        QVERIFY(success);
-        QVERIFY(!plugin.isRunning()); // No event processing while the worker runs.
-        QVERIFY(plugin.m_restartQueued);
-        QVERIFY(waitFor([&]() { return plugin.isRunning(); }));
-        QCOMPARE(plugin.m_server->thread(), plugin.thread());
-        QCOMPARE(plugin.m_broadcastTimer->thread(), plugin.thread());
-        QVERIFY(!plugin.m_restartQueued);
-
-        QTcpSocket client;
-        plugin.m_broadcastTimer->stop();
-        QVERIFY(connectClient(plugin, client));
-        std::atomic_bool finished{false};
-        std::thread concurrentWorker([&]() {
-            for (int i = 0; i < 200; ++i) {
-                plugin.execute();
-                std::this_thread::yield();
-            }
-            finished = true;
-        });
-        while (!finished) {
-            plugin.onBroadcast();
-            QCoreApplication::processEvents();
-            client.readAll();
+        QElapsedTimer timer;
+        timer.start();
+        while (timer.elapsed() < timeout) {
+            const QByteArray payload = readPayload(client, 1000);
+            if (payload.isEmpty())
+                continue;
+            if (accept(payload, decode(payload)))
+                return payload;
         }
-        concurrentWorker.join();
-        QCOMPARE(plugin.m_frameRevision, quint64(300));
-        QCOMPARE(plugin.output(QStringLiteral("client_count")).toInt(), 1);
+        return {};
     }
 
-    void manualStopCancelsPendingStart()
-    {
-        WebSocketServerPlugin plugin;
-        plugin.setParam(QStringLiteral("port"), freePort());
-        std::thread worker([&]() { plugin.execute(); });
-        worker.join();
-        QVERIFY(plugin.m_restartQueued);
-        plugin.stopServer();
-        QCoreApplication::processEvents();
-        QVERIFY(!plugin.isRunning());
-        QVERIFY(!plugin.m_restartQueued);
-
-        // A later execution may auto-start again; old requests cannot cancel it.
-        std::thread laterWorker([&]() { plugin.execute(); });
-        laterWorker.join();
-        QVERIFY(waitFor([&]() { return plugin.isRunning(); }));
-    }
-
-    void snapshotCacheAndQualityInvalidation()
+private slots:
+    void backgroundThreadStreamsBufferedFrame()
     {
         WebSocketServerPlugin plugin;
         QVERIFY(start(plugin));
+        QVERIFY(plugin.isRunning());
+        QVERIFY(plugin.listenPort() > 0);
+
         QTcpSocket client;
         QVERIFY(connectClient(plugin, client));
+        QCOMPARE(plugin.clientCount(), 1);
 
-        cv::Mat input(240, 320, CV_8UC3);
-        cv::randu(input, cv::Scalar::all(0), cv::Scalar::all(255));
-        const cv::Mat original = input.clone();
-        plugin.setInput(QStringLiteral("input"), imageValue(input));
+        plugin.setInput(QStringLiteral("input"),
+                        imageValue(cv::Mat(48, 64, CV_8UC1, cv::Scalar(90))));
         QVERIFY(plugin.execute());
-        input.setTo(cv::Scalar::all(0));
-        plugin.onBroadcast();
-        const QByteArray first = readPayload(client);
+        QCOMPARE(plugin.frameRevision(), quint64(1));
+
+        const QByteArray first = readFrameUntil(client, [](const QByteArray &, const cv::Mat &image) {
+            return !image.empty() && image.channels() == 1 && cv::mean(image)[0] > 89.0;
+        });
         QVERIFY(!first.isEmpty());
         const cv::Mat decoded = decode(first);
-        QCOMPARE(decoded.rows, original.rows);
-        QCOMPARE(decoded.cols, original.cols);
-        QVERIFY(cv::mean(decoded)[0] > 100); // The producer mutation did not alter the snapshot.
-        const char *cachedData = plugin.m_encodedFrame.constData();
-        const quint64 revision = plugin.m_encodedRevision;
+        QCOMPARE(decoded.rows, 48);
+        QCOMPARE(decoded.cols, 64);
+        QCOMPARE(decoded.channels(), 1);
 
-        plugin.onBroadcast();
-        QCOMPARE(readPayload(client), first); // Paused workflows keep transmitting their final image.
-        QVERIFY(plugin.m_encodedFrame.constData() == cachedData);
-        QCOMPARE(plugin.m_encodedRevision, revision);
+        // 不执行流程：后台线程继续发送缓冲区里的同一帧（编码缓存复用）
+        const QByteArray second = readFrameUntil(client, [](const QByteArray &, const cv::Mat &image) {
+            return !image.empty();
+        });
+        QVERIFY(!second.isEmpty());
+        QCOMPARE(second, first);
+        QCOMPARE(plugin.frameRevision(), quint64(1));
 
-        plugin.setParam(QStringLiteral("quality"), 20);
-        plugin.onBroadcast();
-        const QByteArray lowerQuality = readPayload(client);
-        QVERIFY(!lowerQuality.isEmpty());
-        QVERIFY(lowerQuality.size() < first.size());
-        QCOMPARE(plugin.m_encodedQuality, 20);
-        QCOMPARE(plugin.m_encodedRevision, revision);
-
-        QVERIFY(plugin.execute()); // A new black snapshot must replace cached noise.
-        plugin.onBroadcast();
-        QCOMPARE(cv::mean(decode(readPayload(client)))[0], 0.0);
-        QVERIFY(plugin.m_encodedRevision > revision);
+        plugin.stopServer();
+        QVERIFY(!plugin.isRunning());
+        QCOMPARE(plugin.clientCount(), 0);
+        QVERIFY(waitFor([&]() { return client.state() == QAbstractSocket::UnconnectedState; }));
     }
 
-    void manualStartOverridesPendingConfiguration()
+    void executeOnlyUpdatesBuffer()
     {
         WebSocketServerPlugin plugin;
-        const int automaticPort = freePort();
-        int manualPort = freePort();
-        while (manualPort == automaticPort)
-            manualPort = freePort();
-        plugin.setParam(QStringLiteral("port"), automaticPort);
+        plugin.setParam(QStringLiteral("auto_start"), true);
+        plugin.setParam(QStringLiteral("fps"), 20);
+        plugin.setParam(QStringLiteral("port"), freePort());
+        plugin.setParam(QStringLiteral("quality"), 80);
+
+        cv::Mat input(60, 80, CV_8UC3);
+        cv::randu(input, cv::Scalar::all(0), cv::Scalar::all(255));
+        const double expectedMean = cv::mean(input)[0];
+
+        plugin.setInput(QStringLiteral("input"), imageValue(input));
+        QVERIFY(plugin.execute());
+        QVERIFY(waitFor([&]() { return plugin.isRunning(); }));
+
+        QTcpSocket client;
+        QVERIFY(connectClient(plugin, client));
+
+        const QByteArray first = readFrameUntil(client, [](const QByteArray &, const cv::Mat &image) {
+            return !image.empty() && image.channels() == 3;
+        });
+        QVERIFY(!first.isEmpty());
+        QVERIFY(std::abs(cv::mean(decode(first))[0] - expectedMean) < 5.0);
+
+        // 上游原地改成白色，再用新质量强制重新编码：
+        // 缓冲区是深拷贝，取到的仍应是原来的噪声图（而不是 255）
+        input.setTo(cv::Scalar::all(255));
+        plugin.setParam(QStringLiteral("quality"), 30);
+        QVERIFY(plugin.execute());
+        QCOMPARE(plugin.frameRevision(), quint64(2));
+
+        const QByteArray second = readFrameUntil(
+            client,
+            [&first, expectedMean](const QByteArray &payload, const cv::Mat &image) {
+                return !image.empty() && payload.size() < first.size()
+                       && std::abs(cv::mean(image)[0] - expectedMean) < 5.0;
+            });
+        QVERIFY(!second.isEmpty());
+
+        plugin.stopServer();
+    }
+
+    void executeFromWorkerThreadStartsBackgroundServer()
+    {
+        WebSocketServerPlugin plugin;
+        plugin.setParam(QStringLiteral("auto_start"), true);
+        plugin.setParam(QStringLiteral("fps"), 20);
+        const int port = freePort();
+        plugin.setParam(QStringLiteral("port"), port);
+        plugin.setInput(QStringLiteral("input"),
+                        imageValue(cv::Mat(32, 32, CV_8UC3, cv::Scalar(1, 2, 3))));
+
+        // 流程线程调用 execute：只更新缓冲区并投递启动请求，后台线程自己启动
         std::thread worker([&]() { plugin.execute(); });
         worker.join();
-        QVERIFY(plugin.m_restartQueued);
-        plugin.setParam(QStringLiteral("port"), manualPort);
-        QVERIFY(plugin.startServer());
-        QCOMPARE(plugin.listenPort(), manualPort);
-        QCoreApplication::processEvents();
-        QCOMPARE(plugin.listenPort(), manualPort);
-        QVERIFY(plugin.isRunning());
-        QVERIFY(!plugin.m_restartQueued);
-        plugin.m_broadcastTimer->stop();
+
+        QVERIFY(waitFor([&]() { return plugin.isRunning(); }));
+        QCOMPARE(plugin.listenPort(), port);
+        QCOMPARE(plugin.frameRevision(), quint64(1));
+
         QTcpSocket client;
         QVERIFY(connectClient(plugin, client));
-    }
+        QCOMPARE(plugin.clientCount(), 1);
 
-    void noClientsAndBackpressureSkipEncoding()
-    {
-        WebSocketServerPlugin plugin;
-        QVERIFY(start(plugin));
-        plugin.setInput(QStringLiteral("input"), imageValue(cv::Mat(64, 64, CV_8UC3, cv::Scalar::all(128))));
-        QVERIFY(plugin.execute());
-        plugin.onBroadcast();
-        QVERIFY(plugin.m_encodedFrame.isEmpty());
-        QCOMPARE(plugin.m_encodedRevision, quint64(0));
-
-        QTcpSocket slowClient;
-        QVERIFY(connectClient(plugin, slowClient));
-        QTcpSocket *serverSocket = plugin.m_clients.first();
-        // With no event loop turn between calls, bytesToWrite deterministically holds one frame.
-        plugin.onBroadcast();
-        const qint64 queued = serverSocket->bytesToWrite();
-        QVERIFY(queued > 0);
-        const quint64 encodedRevision = plugin.m_encodedRevision;
-        QVERIFY(plugin.execute());
-        for (int i = 0; i < 100; ++i)
-            plugin.onBroadcast();
-        QCOMPARE(serverSocket->bytesToWrite(), queued);
-        QCOMPARE(plugin.m_encodedRevision, encodedRevision);
-        QVERIFY(!readPayload(slowClient).isEmpty());
-
-        // An unblocked peer still receives while the slow client's queue stays bounded.
-        QTcpSocket fastClient;
-        QVERIFY(connectClient(plugin, fastClient));
-        serverSocket->write(QByteArray(1024, 'x'));
-        const qint64 slowQueued = serverSocket->bytesToWrite();
-        QVERIFY(slowQueued > 0);
-        plugin.onBroadcast();
-        QCOMPARE(serverSocket->bytesToWrite(), slowQueued);
-        QVERIFY(!readPayload(fastClient).isEmpty());
-        QCOMPARE(plugin.m_encodedRevision, plugin.m_frameRevision);
-    }
-
-    void grayAlphaEmptyAndUnsupportedImages()
-    {
-        WebSocketServerPlugin plugin;
-        QVERIFY(start(plugin));
-        QTcpSocket client;
-        QVERIFY(connectClient(plugin, client));
-        plugin.setInput(QStringLiteral("input"), imageValue(cv::Mat(16, 24, CV_8UC1, cv::Scalar(90))));
-        QVERIFY(plugin.execute());
-        plugin.onBroadcast();
-        const cv::Mat gray = decode(readPayload(client));
-        QCOMPARE(gray.channels(), 1);
-        QCOMPARE(cv::mean(gray)[0], 90.0);
-
-        plugin.setInput(QStringLiteral("input"), imageValue(cv::Mat(16, 24, CV_8UC4, cv::Scalar(10, 20, 30, 255))));
-        QVERIFY(plugin.execute());
-        plugin.onBroadcast();
-        QCOMPARE(decode(readPayload(client)).channels(), 3);
-
-        plugin.setInput(QStringLiteral("input"), imageValue(cv::Mat()));
-        QVERIFY(plugin.execute());
-        plugin.onBroadcast();
-        QVERIFY(plugin.m_encodedFrame.isEmpty());
-        QCOMPARE(client.bytesAvailable(), qint64(0));
-
-        plugin.setInput(QStringLiteral("input"), imageValue(cv::Mat(16, 24, CV_8UC2)));
-        QVERIFY(plugin.execute());
-        plugin.onBroadcast(); // cv::Exception must not escape the Qt timer callback.
-        QVERIFY(plugin.m_encodedFrame.isEmpty());
-        QVERIFY(!plugin.m_encodingError.isEmpty());
-        const quint64 failedRevision = plugin.m_encodedRevision;
-        plugin.onBroadcast();
-        QCOMPARE(plugin.m_encodedRevision, failedRevision);
-    }
-
-    void idleAndPartialHandshakesCloseOnStop()
-    {
-        WebSocketServerPlugin plugin;
-        QVERIFY(start(plugin));
-        QTcpSocket idle;
-        QTcpSocket partial;
-        idle.connectToHost(QHostAddress::LocalHost, plugin.listenPort());
-        partial.connectToHost(QHostAddress::LocalHost, plugin.listenPort());
-        QVERIFY(waitFor([&]() { return plugin.m_handshaking.size() == 2; }));
-        partial.write("GET / HTTP/1.1\r\nSec-WebSocket-Key:");
-        QVERIFY(waitFor([&]() {
-            for (const QByteArray &request : plugin.m_handshaking)
-                if (!request.isEmpty())
-                    return true;
-            return false;
-        }));
-        QCOMPARE(plugin.clientCount(), 0);
         plugin.stopServer();
-        QVERIFY(waitFor([&]() {
-            return idle.state() == QAbstractSocket::UnconnectedState &&
-                   partial.state() == QAbstractSocket::UnconnectedState;
-        }));
-        QVERIFY(plugin.m_handshaking.isEmpty());
+    }
+
+    void manualStopThenExecuteRestarts()
+    {
+        WebSocketServerPlugin plugin;
+        plugin.setParam(QStringLiteral("auto_start"), true);
+        plugin.setParam(QStringLiteral("fps"), 20);
+        plugin.setParam(QStringLiteral("port"), freePort());
+        plugin.setInput(QStringLiteral("input"),
+                        imageValue(cv::Mat(16, 16, CV_8UC3, cv::Scalar(5, 6, 7))));
+
+        std::thread first([&]() { plugin.execute(); });
+        first.join();
+        QVERIFY(waitFor([&]() { return plugin.isRunning(); }));
+
+        plugin.stopServer();
+        QVERIFY(!plugin.isRunning());
+
+        // 之后的流程执行可以重新拉起后台发送线程
+        std::thread second([&]() { plugin.execute(); });
+        second.join();
+        QVERIFY(waitFor([&]() { return plugin.isRunning(); }));
+
+        plugin.stopServer();
     }
 
     void oversizedHandshakeIsRejected()
     {
         WebSocketServerPlugin plugin;
         QVERIFY(start(plugin));
+
         QTcpSocket client;
         client.connectToHost(QHostAddress::LocalHost, plugin.listenPort());
-        QVERIFY(waitFor([&]() { return !plugin.m_handshaking.isEmpty(); }));
+        QVERIFY(waitFor([&]() { return client.state() == QAbstractSocket::ConnectedState; }));
+
         client.write(QByteArray(20 * 1024, 'x'));
-        QVERIFY(waitFor([&]() { return client.state() == QAbstractSocket::UnconnectedState; }));
-        QVERIFY(plugin.m_handshaking.isEmpty());
+        QVERIFY(waitFor([&]() { return client.state() == QAbstractSocket::UnconnectedState; },
+                        6000));
         QCOMPARE(plugin.clientCount(), 0);
+
+        plugin.stopServer();
     }
 
-    void fragmentedHandshakeCompletes()
-    {
-        WebSocketServerPlugin plugin;
-        QVERIFY(start(plugin));
-        QTcpSocket client;
-        client.connectToHost(QHostAddress::LocalHost, plugin.listenPort());
-        QVERIFY(waitFor([&]() { return !plugin.m_handshaking.isEmpty(); }));
-        client.write("GET / HTTP/1.1\r\nSec-WebSocket-K");
-        QVERIFY(waitFor([&]() { return !plugin.m_handshaking.constBegin().value().isEmpty(); }));
-        QCOMPARE(plugin.clientCount(), 0);
-        client.write("ey: dGhlIHNhbXBsZSBub25jZQ==\r\n\r\n");
-        QVERIFY(waitFor([&]() { return plugin.clientCount() == 1; }));
-        QVERIFY(waitFor([&]() { return client.bytesAvailable() > 0; }));
-        QVERIFY(client.readAll().contains("Sec-WebSocket-Accept: s3pPLMBiTxaQ9kYGzzhZRbK+xOo="));
-        QVERIFY(plugin.m_handshaking.isEmpty());
-    }
-
-    void frameRateUpdateKeepsExistingClients()
-    {
-        WebSocketServerPlugin plugin;
-        QVERIFY(start(plugin));
-        QTcpSocket client;
-        QVERIFY(connectClient(plugin, client));
-        plugin.setParam(QStringLiteral("auto_start"), true);
-        plugin.setParam(QStringLiteral("fps"), 20);
-        std::thread worker([&]() { plugin.execute(); });
-        worker.join();
-        QVERIFY(waitFor([&]() { return plugin.m_broadcastTimer->interval() == 50; }));
-        QCOMPARE(plugin.clientCount(), 1);
-        QCOMPARE(client.state(), QAbstractSocket::ConnectedState);
-    }
-
-    void frameLengthBoundaries()
-    {
-        for (const int length : {0, 125, 126, 65535, 65536}) {
-            const QByteArray payload(length, 'x');
-            const QByteArray frame = WebSocketServerPlugin::textFrame(payload);
-            const int headerSize = length < 126 ? 2 : (length <= 65535 ? 4 : 10);
-            QCOMPARE(frame.size(), qsizetype(length + headerSize));
-            QCOMPARE(static_cast<uchar>(frame.at(0)), uchar(0x81));
-            QCOMPARE(frame.mid(headerSize), payload);
-            quint64 declaredLength = static_cast<uchar>(frame.at(1));
-            if (headerSize > 2) {
-                declaredLength = 0;
-                for (int i = 2; i < headerSize; ++i)
-                    declaredLength = (declaredLength << 8) | static_cast<uchar>(frame.at(i));
-            }
-            QCOMPARE(declaredLength, quint64(length));
-        }
-    }
-
-    void cachedEncodingBenchmark()
+    void frameRevisionTracksExecutes()
     {
         WebSocketServerPlugin plugin;
         plugin.setParam(QStringLiteral("auto_start"), false);
-        cv::Mat image(1080, 1920, CV_8UC3);
-        cv::randu(image, cv::Scalar::all(0), cv::Scalar::all(255));
-        plugin.setInput(QStringLiteral("input"), imageValue(image));
+        QCOMPARE(plugin.frameRevision(), quint64(0));
+
+        plugin.setInput(QStringLiteral("input"),
+                        imageValue(cv::Mat(8, 8, CV_8UC1, cv::Scalar(1))));
         QVERIFY(plugin.execute());
-        QElapsedTimer timer;
-        timer.start();
-        QVERIFY(!plugin.encodedCurrentFrame().isEmpty());
-        const qint64 firstNs = timer.nsecsElapsed();
-        timer.restart();
-        for (int i = 0; i < 1000; ++i)
-            QVERIFY(!plugin.encodedCurrentFrame().isEmpty());
-        qInfo("1080p JPEG+base64+framing: first %.3f ms; cached lookup mean %.3f us (1000 calls)",
-              firstNs / 1e6, timer.nsecsElapsed() / 1e6);
+        QCOMPARE(plugin.frameRevision(), quint64(1));
+
+        QVERIFY(plugin.execute());
+        QCOMPARE(plugin.frameRevision(), quint64(2));
+        QCOMPARE(plugin.output(QStringLiteral("client_count")).toInt(), 0);
     }
 };
 

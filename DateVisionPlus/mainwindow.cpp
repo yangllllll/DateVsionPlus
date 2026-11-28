@@ -266,25 +266,14 @@ void MainWindow::setupVisualShell()
     emptyHint->setAttribute(Qt::WA_TransparentForMouseEvents);
     emptyHint->setText(QStringLiteral("<span style='color:#b7d2df; font-size:20px;'>构建你的视觉检测流程</span>"
                                      "<br><br><span style='color:#8b9da9;'>从左侧拖入工具，或双击工具添加节点</span>"
-                                     "<br><br><span style='color:#697f8c; font-size:11px;'>图像输入  /  图像处理  /  检测定位  /  结果输出</span>"));
+                                    ));
     auto *hintLayout = new QVBoxLayout(ui->flowchartView->viewport());
     hintLayout->addWidget(emptyHint);
     const auto updateHint = [this, emptyHint] { emptyHint->setVisible(m_scene->nodes().isEmpty()); };
     connect(m_scene, &FlowScene::nodeAdded, this, updateHint);
     connect(m_scene, &FlowScene::nodeRemoved, this, updateHint);
 
-    auto *footer = new QWidget(ui->centralwidget);
-    footer->setObjectName(QStringLiteral("workspaceFooter"));
-    auto *footerLayout = new QHBoxLayout(footer);
-    footerLayout->setContentsMargins(14, 6, 14, 6);
-    auto *guide = new QLabel(QStringLiteral("滚轮缩放  /  拖拽框选  /  拖动端口连线"), footer);
-    guide->setProperty("uiRole", "caption");
-    footerLayout->addWidget(guide);
-    footerLayout->addStretch();
-    auto *canvasTag = new QLabel(QStringLiteral("02  /  FLOW EDITOR"), footer);
-    canvasTag->setProperty("uiRole", "caption");
-    footerLayout->addWidget(canvasTag);
-    ui->centralLayout->addWidget(footer);
+
 
     // Let the user size the image and log panes independently.
     auto *bottomSplitter = new QSplitter(Qt::Horizontal, ui->bottomContents);

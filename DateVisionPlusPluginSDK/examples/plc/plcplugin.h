@@ -54,12 +54,12 @@ public:
 
     // ---- 供调试对话框使用 ----
     Snap7::Snap7Client *client() { return &m_plc; }
-    QString ip() const { return paramString(QStringLiteral("ip"), QStringLiteral("192.168.8.40")); }
+    QString ip() const { return paramString(QStringLiteral("ip"), QStringLiteral("192.168.40.70")); }
     int rack() const { return paramInt(QStringLiteral("rack"), 0); }
     int slot() const { return paramInt(QStringLiteral("slot"), 1); }
-    int areaCode() const { return Snap7::areaFromName(paramString(QStringLiteral("area"), QStringLiteral("MK"))); }
-    int dbNumber() const { return paramInt(QStringLiteral("db"), 0); }
-    int startByte() const { return paramInt(QStringLiteral("address"), 100); }
+    int areaCode() const { return Snap7::areaFromName(paramString(QStringLiteral("area"), QStringLiteral("DB"))); }
+    int dbNumber() const { return paramInt(QStringLiteral("db"), 19); }
+    int startByte() const { return paramInt(QStringLiteral("address"), 7); }
     bool disconnectAfterWrite() const
     {
         return paramBool(QStringLiteral("disconnect_after_write"), true);
